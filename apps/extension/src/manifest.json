@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Thanks2Go Profile Inspector",
+  "version": "0.1.0",
+  "description": "Inspect an explicitly declared Thanks2Go profile after a user click.",
+  "permissions": ["activeTab", "scripting"],
+  "action": { "default_title": "Inspect gratitude profile", "default_popup": "popup.html" }
+}

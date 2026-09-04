@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Secret-pattern guard
+        shell: bash
+        run: |
+          if git grep -nE '(PAYPAL_T2G_CLIENT_SECRET=.{8,}|BEGIN (EC |RSA )?PRIVATE KEY|reward[.]tremendous[.]com/prepaid)' -- ':!package-lock.json' ':!.github/workflows/ci.yml'; then
+            echo 'Potential secret detected'; exit 1
+          fi

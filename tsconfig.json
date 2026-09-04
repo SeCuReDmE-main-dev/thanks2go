@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@thanks2go/contracts": ["packages/contracts/src/index.ts"],
+      "@thanks2go/a2a": ["packages/a2a/src/index.ts"]
+    }
+  },
+  "include": ["api/**/*.ts", "packages/**/*.ts", "tests/**/*.ts"]
+}

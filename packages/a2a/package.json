@@ -1,0 +1,8 @@
+{
+  "name": "@thanks2go/a2a",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": { "@a2a-js/sdk": "1.1.0", "jose": "6.2.11" }
+}
