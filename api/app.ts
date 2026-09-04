@@ -9,9 +9,10 @@ import { ImmediateAgentExecutor, signedAgentCard, type AgentKind } from "@thanks
 import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "@thanks2go/contracts";
 import { hashPayerReference, issueReceiptCredential, keyMaterial, signMandate, verifyMandate } from "./crypto.js";
 import { captureOrder, createOrder } from "./paypal.js";
-import { mandateReference, verifySolanaTransaction } from "./solana.js";
+import { verifySolanaTransaction } from "./solana.js";
 
 const origin = process.env.PUBLIC_ORIGIN ?? "https://thanks2go.securedme.ca";
+const allowedOrigins = new Set([origin, ...(process.env.VERCEL_ENV === "production" ? [] : ["http://localhost:5173", "http://127.0.0.1:5173"])]);
 
 function profile() {
   const recipient = process.env.SOLANA_DEVNET_RECIPIENT ?? "";
@@ -41,7 +42,7 @@ export async function createApp() {
   app.use(express.json({ limit: "32kb", type: ["application/json", "application/*+json"] }));
   app.use((request, _response, next) => {
     const requestOrigin = request.get("origin");
-    if (requestOrigin && requestOrigin !== origin) return next(new PublicError("RAIL_REJECTED", "Cross-origin request rejected.", 403));
+    if (requestOrigin && !allowedOrigins.has(requestOrigin)) return next(new PublicError("RAIL_REJECTED", "Cross-origin request rejected.", 403));
     next();
   });
 
@@ -57,7 +58,7 @@ export async function createApp() {
       if (input.rail === "solana-devnet" && !currentProfile.solana.recipient) throw new PublicError("RECIPIENT_NOT_VERIFIED", "The devnet destination is not configured.", 409);
       if (input.rail === "paypal" && !currentProfile.paypal.enabled) throw new PublicError("RAIL_REJECTED", "PayPal is not configured.", 503);
       const mandate = newMandate(input, sha256({ profile: currentProfile.profileUrl, recipient: input.rail === "paypal" ? "configured-paypal-merchant" : currentProfile.solana.recipient }));
-      response.status(201).json({ mandate, mandateToken: await signMandate(mandate), reference: input.rail === "solana-devnet" ? mandateReference(mandate.id) : undefined, state: "STAGED", humanApprovalRequired: true });
+      response.status(201).json({ mandate, mandateToken: await signMandate(mandate), state: "STAGED", humanApprovalRequired: true });
     } catch (error) { next(error); }
   });
   app.post("/api/paypal/orders", async (request, response, next) => {

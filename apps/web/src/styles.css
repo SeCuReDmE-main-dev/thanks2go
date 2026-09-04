@@ -1,5 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Newsreader:ital,wght@1,500&display=swap');
-:root { color-scheme: dark; font-family: "DM Sans", system-ui, sans-serif; color: #f8f5ec; background: #09100d; font-synthesis: none; }
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #f8f5ec; background: #09100d; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: radial-gradient(circle at 80% 10%, #183a2a 0, transparent 35%), #09100d; }
 a { color: inherit; }
@@ -16,7 +15,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .hero { padding: 7rem 0 5rem; max-width: 900px; }
 .eyebrow, .label, .rail-number { color: #b8d5c3; text-transform: uppercase; letter-spacing: .13em; font-size: .72rem; font-weight: 600; }
 h1 { font-size: clamp(3.4rem, 9vw, 7.8rem); line-height: .86; letter-spacing: -.065em; margin: 1rem 0 2rem; font-weight: 500; }
-h1 em { font-family: "Newsreader", serif; color: #eaff86; font-weight: 500; }
+h1 em { font-family: Georgia, "Times New Roman", serif; color: #eaff86; font-weight: 500; }
 h2 { font-size: clamp(1.7rem, 4vw, 3rem); letter-spacing: -.04em; margin: .4rem 0; }
 h3 { font-size: 2rem; margin: .5rem 0 1rem; }
 .lede { font-size: 1.25rem; line-height: 1.6; color: #c5cec8; max-width: 700px; }
@@ -39,5 +38,5 @@ h3 { font-size: 2rem; margin: .5rem 0 1rem; }
 .boundary { margin: 5rem 0; padding: 3rem; background: #eaff86; color: #132015; border-radius: 1.5rem; }
 .boundary p { max-width: 760px; line-height: 1.7; }
 footer { border-top: 1px solid #ffffff22; border-bottom: 0; margin-top: 4rem; }
-@media (max-width: 760px) { .hero { padding-top: 4rem; } .identity, .rail, .solana { grid-template-columns: 1fr; } .solana > button, .solana > div { grid-column: 1; } .rail { gap: 1rem; } .topbar span { display: none; } }
+@media (max-width: 760px) { .hero { padding-top: 4rem; } .identity, .rail, .solana { grid-template-columns: 1fr; } .solana > button, .solana > div { grid-column: 1; } .rail { gap: 1rem; } .topbar span { display: none; } .status { position: static; margin: 2rem 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
