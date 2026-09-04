@@ -21,7 +21,7 @@ beforeEach(() => {
   panel={focus:vi.fn(()=>{doc.activeElement=panel;}),scrollIntoView:vi.fn()};
   doc={modelContext:registry,querySelector:vi.fn(()=>panel),activeElement:null};
   fetchMock=vi.fn(); notify=vi.fn();
-  vi.stubGlobal("document",doc);vi.stubGlobal("fetch",fetchMock);
+  vi.stubGlobal("document",doc);vi.stubGlobal("fetch",fetchMock);vi.stubGlobal("location",new URL(url));
 });
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 describe("WebMCP real callbacks and payment boundary",()=>{
@@ -63,6 +63,7 @@ describe("WebMCP real callbacks and payment boundary",()=>{
     const value=await run(names[0]!);
     expect(value.isError).toBe(false);
     expect(parse(value).humanIdentityVerified).toBe(false);
+    expect(parse(value)).toMatchObject({canonicalOriginMatch:true,transportSecurity:"tls",paymentInitiated:false,secretsReturned:false});
     expect(JSON.stringify(value)).not.toMatch(/private@example|never-output/);
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/profiles/securedme");
   });
@@ -75,7 +76,8 @@ describe("WebMCP real callbacks and payment boundary",()=>{
     const input=rail==="paypal"?{rail}:{rail,solAmount:"0.005"};
     const amount=rail==="paypal"?{currency:"USD",minorUnits:100}:{currency:"SOL",atomicUnits:"5000000"};
     respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),mandateToken:"never-output",
-      mandate:{profileUrl:url,rail,amount,expiresAt:new Date(Date.now()+590000).toISOString()}});
+      mandate:{profileUrl:url,rail,amount,expiresAt:new Date(Date.now()+590000).toISOString()},
+      agentExchange:{recipient:{recipientAttestationHash:"c".repeat(64),credential:"header.payload.signature"}}});
     const value=await run(names[1]!,input);
     expect(value.isError).toBe(false);expect(parse(value).amount).toEqual(amount);
     expect(JSON.stringify(value)).not.toContain("never-output");
@@ -97,7 +99,7 @@ describe("WebMCP real callbacks and payment boundary",()=>{
   it("handoff focuses and scrolls the panel without network or click",async()=>{
     await registerThanks2GoTools(url);
     const value=await run(names[2]!);
-    expect(parse(value)).toEqual({opened:true,paymentInitiated:false,humanApprovalRequired:true});
+    expect(parse(value)).toMatchObject({opened:true,focusTarget:"#rails",paymentInitiated:false,secretsReturned:false,humanApprovalRequired:true});
     expect(doc.activeElement).toBe(panel);expect(panel.scrollIntoView).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -108,7 +110,7 @@ describe("WebMCP real callbacks and payment boundary",()=>{
   it("verifies existing receipts without leaking their credential",async()=>{
     await registerThanks2GoTools(url);respond({valid:true,receipt});
     const value=await run(names[3]!,{receipt});
-    expect(parse(value).paymentStatus).toBe("confirmed");
+    expect(parse(value)).toMatchObject({cryptographicValidity:true,paymentStatus:"confirmed",settlementConfirmed:true,usableAsPaymentProof:true,secretsReturned:false});
     expect(JSON.stringify(value)).not.toContain("test-signature");
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/receipts/verify");
   });

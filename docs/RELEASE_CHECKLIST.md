@@ -6,7 +6,7 @@
 - [x] Contract, expiry, tamper, API, extension, and WebMCP tests
 - [x] Real SDK A2A 1.0 `SendMessage` integration test
 - [x] Signed Agent Cards in configured-key mode
-- [x] Payer agent obtains and validates a recipient-agent response before staging (local integration)
+- [x] Payer agent obtains and validates a recipient-agent response before staging (local and production)
 - [x] Solana reference cryptographically bound to one mandate; cross-mandate replay rejected (automated)
 - [x] Production web build and MV3 package build
 - [x] Production dependency audit reports zero known vulnerabilities
@@ -32,6 +32,7 @@
 - [x] Exact cPanel CNAME configured
 - [x] TLS and public profile URL verified
 - [x] CSP and Origin behavior verified in production
+- [x] Four WebMCP tools discovered by the public browser surface
 
 ## Submission
 

@@ -59,6 +59,6 @@ See [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), 
 
 ## Status
 
-The public baseline has Vercel, TLS, canonical DNS, recipient proof, signed A2A cards and security headers. The local working revision adds the complete payer-to-recipient SDK exchange, mandate-bound Solana instructions, the SecuredMe visual theme, stricter WebMCP contracts, dedicated PayPal credentials and broader tests. It is not yet deployed. A finalized real devnet transfer, a separate consenting live PayPal payer, the video and DEV publication remain release gates and are not claimed until verified.
+The public deployment has Vercel, TLS, canonical DNS, dedicated PayPal configuration, recipient proof and credential, signed A2A cards, a production payer-to-recipient exchange, mandate-bound Solana instructions, the SecuredMe visual theme, four browser-discovered WebMCP tools and security headers. A finalized real devnet transfer, a separate consenting live PayPal payer, the installed-extension browser pass, the video and DEV publication remain release gates and are not claimed until verified.
 
 MIT © 2026 Jean-Sébastien Beaulieu / SecuredMe

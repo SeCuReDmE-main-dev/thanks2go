@@ -17,10 +17,10 @@ const receiptSchema = z.object({
 const result = (value: unknown, isError = false) => ({ content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value, isError });
 // Optional descriptive metadata for directory scanners; native registration may ignore it.
 const outputFields: Record<string, Record<string, unknown>> = {
-  inspect_gratitude_profile: {profileUrl:{type:"string",format:"uri"},originControlled:{type:"boolean"},humanIdentityVerified:{const:false},paypal:{type:"object"},solana:{type:"object"},humanApprovalRequired:{const:true}},
-  stage_gratitude_intent: {state:{const:"STAGED"},profileUrl:{type:"string",format:"uri"},rail:{enum:["paypal","solana-devnet"]},amount:{type:"object"},mandateHash:{type:"string",pattern:"^[a-f0-9]{64}$"},expiresAt:{type:"string",format:"date-time"},paymentInitiated:{const:false},humanApprovalRequired:{const:true},nextStep:{type:"string"}},
-  open_payment_handoff: {opened:{const:true},paymentInitiated:{const:false},humanApprovalRequired:{const:true}},
-  verify_gratitude_receipt: {valid:{const:true},rail:{enum:["paypal","solana-devnet"]},paymentStatus:{enum:["confirmed","failed","cancelled"]},mandateHash:{type:"string",pattern:"^[a-f0-9]{64}$"},providerReference:{type:"string"},paymentInitiated:{const:false}}
+  inspect_gratitude_profile: {profileUrl:{type:"string",format:"uri"},currentPageOrigin:{type:"string"},canonicalOriginMatch:{type:"boolean"},transportSecurity:{enum:["tls","local-development","insecure"]},originControlled:{type:"boolean"},humanIdentityVerified:{const:false},paypalEnvironment:{enum:["live","sandbox"]},solanaNetwork:{const:"devnet"},solanaDestinationConfigured:{type:"boolean"},evidenceJwksUrl:{type:"string",format:"uri"},payerAgentCardUrl:{type:"string",format:"uri"},recipientAgentCardUrl:{type:"string",format:"uri"},paymentInitiated:{const:false},secretsReturned:{const:false},humanApprovalRequired:{const:true},trustStatement:{type:"string"}},
+  stage_gratitude_intent: {state:{const:"STAGED"},profileUrl:{type:"string",format:"uri"},rail:{enum:["paypal","solana-devnet"]},amount:{type:"object"},mandateHash:{type:"string",pattern:"^[a-f0-9]{64}$"},expiresAt:{type:"string",format:"date-time"},recipientAttestationHash:{type:"string",pattern:"^[a-f0-9]{64}$"},recipientControlCredential:{type:"string"},verificationJwksUrl:{type:"string",format:"uri"},paymentInitiated:{const:false},secretsReturned:{const:false},humanApprovalRequired:{const:true},prohibitedActions:{type:"array",items:{type:"string"}},nextStep:{type:"string"}},
+  open_payment_handoff: {opened:{const:true},focusTarget:{const:"#rails"},paymentInitiated:{const:false},secretsReturned:{const:false},humanApprovalRequired:{const:true},prohibitedActions:{type:"array",items:{type:"string"}}},
+  verify_gratitude_receipt: {cryptographicValidity:{const:true},rail:{enum:["paypal","solana-devnet"]},paymentStatus:{enum:["confirmed","failed","cancelled"]},settlementConfirmed:{type:"boolean"},usableAsPaymentProof:{type:"boolean"},mandateHash:{type:"string",pattern:"^[a-f0-9]{64}$"},providerReference:{type:"string"},credentialType:{const:"vc+jwt"},paymentInitiated:{const:false},secretsReturned:{const:false},guidance:{type:"string"}}
 };
 function outputSchema(name: string): Record<string, unknown> {
   const fields = outputFields[name]!;
@@ -82,10 +82,17 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
         if (data.profileUrl !== profileUrl || data.attestation?.humanIdentityVerified !== false ||
             typeof data.paypal?.enabled !== "boolean" || !["live", "sandbox"].includes(data.paypal?.environment) ||
             data.solana?.network !== "devnet" || typeof data.solana?.recipient !== "string") throw new ToolFailure("INVALID_RESPONSE");
-        return {profileUrl, originControlled:data.attestation.originControlled === true, humanIdentityVerified:false,
-          paypal:{enabled:data.paypal.enabled, environment:data.paypal.environment, currency:"USD", minorUnits:100},
-          solana:{network:"devnet", destinationConfigured:Boolean(data.solana.recipient), presets:["0.001","0.005","0.01"]},
-          humanApprovalRequired:true};
+        const currentPageOrigin = location.origin;
+        const localDevelopment = ["localhost", "127.0.0.1"].includes(location.hostname);
+        return {profileUrl, currentPageOrigin, canonicalOriginMatch:currentPageOrigin === new URL(profileUrl).origin,
+          transportSecurity:location.protocol === "https:" ? "tls" : localDevelopment ? "local-development" : "insecure",
+          originControlled:data.attestation.originControlled === true, humanIdentityVerified:false,
+          paypalEnvironment:data.paypal.environment, solanaNetwork:"devnet", solanaDestinationConfigured:Boolean(data.solana.recipient),
+          evidenceJwksUrl:`${new URL(profileUrl).origin}/.well-known/jwks.json`,
+          payerAgentCardUrl:`${new URL(profileUrl).origin}/agents/payer/.well-known/agent-card.json`,
+          recipientAgentCardUrl:`${new URL(profileUrl).origin}/agents/recipient/.well-known/agent-card.json`,
+          paymentInitiated:false, secretsReturned:false, humanApprovalRequired:true,
+          trustStatement:"Origin and configured rail control only. Human identity, profile safety and payer identity are not verified."};
       }),
     tool("stage_gratitude_intent",
       "Prepare a ten-minute intent for PayPal USD 1 or an explicit Solana devnet preset. Returns a summary, never a payment token. The human must review and approve using the visible controls.",
@@ -100,10 +107,16 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
             !mandate.amount || Object.entries(expected).some(([key,value])=>mandate.amount[key] !== value) ||
             !Number.isFinite(Date.parse(mandate.expiresAt)) || Date.parse(mandate.expiresAt) <= Date.now() ||
             Date.parse(mandate.expiresAt) - Date.now() > 600000) throw new ToolFailure("INVALID_RESPONSE");
+        const recipient = data.agentExchange?.recipient;
+        if (!/^[a-f0-9]{64}$/.test(recipient?.recipientAttestationHash ?? "") ||
+            typeof recipient?.credential !== "string" || recipient.credential.split(".").length !== 3) throw new ToolFailure("INVALID_RESPONSE");
         notify({rail:input.rail, solAmount:input.solAmount,
           message: `Agent prepared ${input.rail === "paypal" ? "$1.00 USD via PayPal" : input.solAmount+" SOL on devnet"}. Review the visible controls; no payment has started.`});
         return {state:"STAGED", profileUrl, rail:input.rail, amount:expected, mandateHash:data.mandateHash,
-          expiresAt:mandate.expiresAt, paymentInitiated:false, humanApprovalRequired:true,
+          expiresAt:mandate.expiresAt, recipientAttestationHash:recipient.recipientAttestationHash,
+          recipientControlCredential:recipient.credential, verificationJwksUrl:`${new URL(profileUrl).origin}/.well-known/jwks.json`,
+          paymentInitiated:false, secretsReturned:false, humanApprovalRequired:true,
+          prohibitedActions:["approve_payment","capture_paypal","sign_wallet_transaction"],
           nextStep:"open_payment_handoff; the human reviews and stages a fresh payment using the visible controls"};
       }),
     tool("open_payment_handoff",
@@ -114,7 +127,8 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
         panel.scrollIntoView({behavior:"instant", block:"start"});
         panel.focus();
         if (document.activeElement !== panel) throw new ToolFailure("HANDOFF_UNAVAILABLE");
-        return {opened:true, paymentInitiated:false, humanApprovalRequired:true};
+        return {opened:true, focusTarget:"#rails", paymentInitiated:false, secretsReturned:false, humanApprovalRequired:true,
+          prohibitedActions:["approve_payment","capture_paypal","sign_wallet_transaction"]};
       }),
     tool("verify_gratitude_receipt",
       "Verify the signature and field binding of an existing Thanks2Go receipt. Valid does not mean confirmed: inspect the returned paymentStatus. No payment action.",
@@ -123,8 +137,11 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
         if (data.valid !== true) throw new ToolFailure("INVALID_RECEIPT");
         const verified = receiptSchema.parse(data.receipt);
         if (Object.keys(input.receipt).some(key=>input.receipt[key] !== (verified as any)[key])) throw new ToolFailure("INVALID_RECEIPT");
-        return {valid:true, rail:verified.rail, paymentStatus:verified.status, mandateHash:verified.mandateHash,
-          providerReference:verified.providerReference, paymentInitiated:false};
+        const settlementConfirmed = verified.status === "confirmed";
+        return {cryptographicValidity:true, rail:verified.rail, paymentStatus:verified.status,
+          settlementConfirmed, usableAsPaymentProof:settlementConfirmed, mandateHash:verified.mandateHash,
+          providerReference:verified.providerReference, credentialType:"vc+jwt", paymentInitiated:false, secretsReturned:false,
+          guidance:settlementConfirmed ? "Signature and provider-confirmed status match." : "Signature is valid, but this receipt is not proof of a completed payment."};
       })
   ];
   try {
