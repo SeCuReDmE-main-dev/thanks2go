@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { exportJWK, generateKeyPair, importJWK, jwtVerify, SignJWT, type JWK } from "jose";
-import { assertMandateActive, gratitudeMandateSchema, sha256, type GratitudeMandate } from "@thanks2go/contracts";
+import { assertMandateActive, gratitudeMandateSchema, sha256, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 type SigningKey = Awaited<ReturnType<typeof importJWK>>;
 type KeyMaterial = { privateKey: SigningKey; publicJwk: JWK; kid: string };

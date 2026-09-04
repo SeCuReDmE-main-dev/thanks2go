@@ -1,5 +1,5 @@
 import bs58 from "bs58";
-import { PublicError, type GratitudeMandate } from "@thanks2go/contracts";
+import { PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 export async function verifySolanaTransaction(signature: string, mandate: GratitudeMandate, recipient: string): Promise<void> {
   if (mandate.rail !== "solana-devnet" || mandate.amount.currency !== "SOL") throw new PublicError("RAIL_REJECTED", "The mandate is not a Solana devnet mandate.");

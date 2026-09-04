@@ -5,8 +5,8 @@ import { importJWK } from "jose";
 import type { AgentCard } from "@a2a-js/sdk";
 import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/server/express";
-import { ImmediateAgentExecutor, signedAgentCard, type AgentKind } from "@thanks2go/a2a";
-import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "@thanks2go/contracts";
+import { ImmediateAgentExecutor, signedAgentCard, unsignedAgentCard, type AgentKind } from "../packages/a2a/src/index.js";
+import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "../packages/contracts/src/index.js";
 import { hashPayerReference, issueReceiptCredential, keyMaterial, signMandate, verifyMandate } from "./crypto.js";
 import { captureOrder, createOrder } from "./paypal.js";
 import { verifySolanaTransaction } from "./solana.js";
@@ -28,7 +28,7 @@ async function card(kind: AgentKind): Promise<AgentCard> {
   const keys = await keyMaterial();
   const privateText = process.env.ES256_PRIVATE_JWK;
   if (!privateText) {
-    const unsigned = (await import("@thanks2go/a2a")).unsignedAgentCard(kind, origin);
+    const unsigned = unsignedAgentCard(kind, origin);
     return { ...unsigned, description: `${unsigned.description} Local ephemeral-key mode; unsigned card.` };
   }
   return signedAgentCard(kind, origin, JSON.parse(privateText), keys.kid);

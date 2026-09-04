@@ -1,4 +1,4 @@
-import { PublicError, type GratitudeMandate } from "@thanks2go/contracts";
+import { PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 const endpoint = () => process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
