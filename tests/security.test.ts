@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { createPublicKey, verify } from "node:crypto";
+import bs58 from "bs58";
 import { describe, expect, it } from "vitest";
 
 describe("deployment security", () => {
@@ -16,5 +18,12 @@ describe("deployment security", () => {
     const app = await readFile(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8");
     expect(app).toContain("QRCode.toDataURL(profile.profileUrl");
     expect(app).not.toMatch(/QRCode\.toDataURL\([^\n]*(wallet|recipient|amount|mandateToken)/);
+  });
+
+  it("verifies the public devnet recipient-control attestation", async () => {
+    const proof = JSON.parse(await readFile(new URL("../docs/RECIPIENT_ATTESTATION.json", import.meta.url), "utf8"));
+    const publicKey = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(bs58.decode(proof.recipient)).toString("base64url") }, format: "jwk" });
+    expect(verify(null, Buffer.from(proof.challenge), publicKey, Buffer.from(proof.signature, "base64url"))).toBe(true);
+    expect(proof.humanIdentityVerified).toBe(false);
   });
 });

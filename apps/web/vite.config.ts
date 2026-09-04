@@ -3,5 +3,6 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: { dedupe: ["react", "react-dom"] },
   server: { proxy: { "/api": "http://127.0.0.1:3001", "/agents": "http://127.0.0.1:3001", "/.well-known": "http://127.0.0.1:3001" } }
 });

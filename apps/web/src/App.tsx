@@ -95,7 +95,7 @@ export default function App() {
 
       <section className="identity" aria-labelledby="recipient-title">
         <div><p className="label">Declared recipient</p><h2 id="recipient-title">{profile.displayName}</h2><p>Canonical origin and configured rail destination are controlled. Human identity is not asserted.</p></div>
-        <ul aria-label="Verification claims"><li>Origin controlled</li><li>Rail destination {profile.attestation.railDestinationControlled ? "controlled" : "configuration pending"}</li><li>No identity claim</li></ul>
+        <ul aria-label="Verification claims"><li>Origin controlled</li><li>Solana destination {profile.solana.recipient ? "controlled" : "configuration pending"}</li><li>PayPal destination {profile.paypal.enabled ? "controlled" : "configuration pending"}</li><li>No identity claim</li></ul>
         {profileQr && <figure><img src={profileQr} width="128" height="128" alt="QR code containing only the canonical Thanks2Go profile URL"/><figcaption>Profile URL only—never a payment.</figcaption></figure>}
       </section>
 
