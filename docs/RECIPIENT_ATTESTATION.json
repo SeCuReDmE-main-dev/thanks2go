@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "purpose": "Proof that the dedicated Solana devnet receiving key was controlled when configured.",
+  "network": "devnet",
+  "recipient": "6ywCP21EgS6a7y752rHT38qDypsb9NNLi2Db5iYXd9qj",
+  "challenge": "Thanks2Go recipient-control proof|https://thanks2go.securedme.ca/p/securedme|2026-09-04T21:20:00Z",
+  "signatureEncoding": "base64url-ed25519",
+  "signature": "49VTd4CGjbb-yVEDzElkvx_bwK9jM73nSrMSKAQP57_xoPyhGi1W9cJvWRoW6CRSif_-HZRHq2k_BiqTtrpVAQ",
+  "humanIdentityVerified": false
+}

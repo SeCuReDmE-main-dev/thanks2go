@@ -11,4 +11,10 @@ describe("deployment security", () => {
     expect(api).toContain('limit: "32kb"');
     expect(api).not.toMatch(/fetch\(request\.(body|query|params)/);
   });
+
+  it("generates the general QR from the canonical profile URL only", async () => {
+    const app = await readFile(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8");
+    expect(app).toContain("QRCode.toDataURL(profile.profileUrl");
+    expect(app).not.toMatch(/QRCode\.toDataURL\([^\n]*(wallet|recipient|amount|mandateToken)/);
+  });
 });

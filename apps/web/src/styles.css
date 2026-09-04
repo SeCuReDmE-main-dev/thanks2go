@@ -19,10 +19,13 @@ h1 em { font-family: Georgia, "Times New Roman", serif; color: #eaff86; font-wei
 h2 { font-size: clamp(1.7rem, 4vw, 3rem); letter-spacing: -.04em; margin: .4rem 0; }
 h3 { font-size: 2rem; margin: .5rem 0 1rem; }
 .lede { font-size: 1.25rem; line-height: 1.6; color: #c5cec8; max-width: 700px; }
-.identity { display: grid; grid-template-columns: 1fr auto; gap: 2rem; border: 1px solid #ffffff25; border-radius: 1.5rem; padding: 2rem; background: #ffffff08; }
+.identity { display: grid; grid-template-columns: 1fr auto auto; gap: 2rem; border: 1px solid #ffffff25; border-radius: 1.5rem; padding: 2rem; background: #ffffff08; }
 .identity p { color: #bfc9c2; }
 .identity ul { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; align-content: center; }
 .identity li::before { content: "✓"; color: #eaff86; margin-right: .6rem; }
+.identity figure { margin: 0; text-align: center; }
+.identity img { display: block; border-radius: .75rem; }
+.identity figcaption { margin-top: .45rem; color: #bfc9c2; font-size: .72rem; max-width: 128px; }
 .rails { padding: 7rem 0 2rem; }
 .section-heading { margin-bottom: 2rem; }
 .rail { display: grid; grid-template-columns: 140px 1fr minmax(200px, 310px); align-items: center; gap: 2rem; border-top: 1px solid #ffffff30; padding: 2.2rem 0; }

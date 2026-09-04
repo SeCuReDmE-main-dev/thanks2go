@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { PaymentButton } from "@solana-commerce/kit";
+import QRCode from "qrcode";
 import { registerThanks2GoTools } from "./webmcp";
 
 type Profile = {
@@ -23,6 +24,7 @@ export default function App() {
   const [solStage, setSolStage] = useState<Stage>();
   const [status, setStatus] = useState("Choose a rail. Nothing happens without your click.");
   const [busy, setBusy] = useState(false);
+  const [profileQr, setProfileQr] = useState("");
   const query = useMemo(() => new URLSearchParams(location.search), []);
 
   useEffect(() => {
@@ -30,6 +32,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!profile) return;
+    QRCode.toDataURL(profile.profileUrl, { errorCorrectionLevel: "M", margin: 1, width: 180, color: { dark: "#132015", light: "#eaff86" } }).then(setProfileQr).catch(() => undefined);
     let controller: AbortController | undefined;
     registerThanks2GoTools(profile.profileUrl).then((value) => { controller = value; }).catch(() => undefined);
     return () => controller?.abort();
@@ -93,6 +96,7 @@ export default function App() {
       <section className="identity" aria-labelledby="recipient-title">
         <div><p className="label">Declared recipient</p><h2 id="recipient-title">{profile.displayName}</h2><p>Canonical origin and configured rail destination are controlled. Human identity is not asserted.</p></div>
         <ul aria-label="Verification claims"><li>Origin controlled</li><li>Rail destination {profile.attestation.railDestinationControlled ? "controlled" : "configuration pending"}</li><li>No identity claim</li></ul>
+        {profileQr && <figure><img src={profileQr} width="128" height="128" alt="QR code containing only the canonical Thanks2Go profile URL"/><figcaption>Profile URL only—never a payment.</figcaption></figure>}
       </section>
 
       <section id="rails" className="rails" tabIndex={-1} aria-labelledby="rails-title">
