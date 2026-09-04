@@ -8,11 +8,11 @@
 - [x] Signed Agent Cards in configured-key mode
 - [x] Production web build and MV3 package build
 - [x] Production dependency audit reports zero known vulnerabilities
-- [ ] GitHub Actions green on the public repository
+- [x] GitHub Actions green on the public repository
 
 ## Provider evidence
 
-- [ ] Dedicated devnet receiving wallet configured and control challenge signed
+- [x] Dedicated devnet receiving wallet configured and control challenge signed
 - [ ] Commerce Kit accept, reject, cancel, wrong-amount, wrong-recipient, reuse, and finality cases captured
 - [ ] Dedicated `Thanks2Go Sandbox` PayPal app created after confirmation
 - [ ] Sandbox success, cancellation, refusal, double-click, and idempotent retry captured
@@ -24,12 +24,12 @@
 
 - [ ] Keyboard-only pass
 - [ ] Contrast and screen-reader pass
-- [ ] Mobile viewport pass
+- [x] Mobile viewport pass
 - [ ] Chrome extension clean-profile pass
-- [ ] Vercel production deployment
-- [ ] Exact cPanel CNAME configured
-- [ ] TLS and public profile URL verified
-- [ ] CSP and Origin behavior verified in production
+- [x] Vercel production deployment
+- [x] Exact cPanel CNAME configured
+- [x] TLS and public profile URL verified
+- [x] CSP and Origin behavior verified in production
 
 ## Submission
 

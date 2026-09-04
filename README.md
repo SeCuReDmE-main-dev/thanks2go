@@ -59,6 +59,6 @@ See [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), 
 
 ## Status
 
-Core implementation and automated checks are in place. Provider credentials, end-to-end sandbox/live evidence, dedicated devnet wallet proof, Vercel/TLS, video, and DEV publication are tracked as release gates and are not claimed until verified.
+The public Vercel deployment, TLS, canonical DNS, dedicated devnet recipient proof, signed A2A cards, real A2A exchange, automated checks, and production security headers are verified. PayPal provider credentials, provider end-to-end evidence, a finalized devnet transfer, the video, and DEV publication remain release gates and are not claimed until verified.
 
 MIT © 2026 Jean-Sébastien Beaulieu / SecuredMe
