@@ -1,17 +1,25 @@
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Server } from "node:http";
 import type { Express } from "express";
 import { exportJWK, generateKeyPair } from "jose";
 
 let app: Express;
+let server: Server;
 beforeAll(async () => {
   const pair = await generateKeyPair("ES256", { extractable: true });
   process.env.ES256_PRIVATE_JWK = JSON.stringify(await exportJWK(pair.privateKey));
   process.env.ES256_KEY_ID = "thanks2go-test";
   process.env.SOLANA_DEVNET_RECIPIENT = "6ywCP21EgS6a7y752rHT38qDypsb9NNLi2Db5iYXd9qj";
   process.env.PAYPAL_T2G_CLIENT_ID = "configured-for-contract-test";
-  app = await (await import("../api/app.js")).createApp();
+  let agentOrigin = "";
+  app = await (await import("../api/app.js")).createApp({ agentOrigin: () => agentOrigin });
+  server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No test port");
+  agentOrigin = `http://127.0.0.1:${address.port}`;
 });
+afterAll(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
 
 describe("API boundaries", () => {
   it("returns a filtered public profile", async () => {
@@ -29,6 +37,8 @@ describe("API boundaries", () => {
     expect(response.body.state).toBe("STAGED");
     expect(response.body.humanApprovalRequired).toBe(true);
     expect(response.body.mandate.amount.atomicUnits).toBe("1000000");
+    expect(response.body.agentExchange.recipient.solanaControlProofVerified).toBe(true);
+    expect(response.body.agentExchange.recipient.credential.split(".")).toHaveLength(3);
   });
 
   it("refuses PayPal order creation without explicit approval", async () => {
@@ -47,9 +57,27 @@ describe("API boundaries", () => {
   it("performs a real A2A 1.0 SendMessage exchange", async () => {
     const response = await request(app).post("/api/a2a/recipient")
       .set("A2A-Version", "1.0")
-      .send({ jsonrpc: "2.0", id: 1, method: "SendMessage", params: { message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "Verify the declared recipient", mediaType: "text/plain" }] } } })
+      .send({ jsonrpc: "2.0", id: 1, method: "SendMessage", params: { message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: JSON.stringify({ profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "solana-devnet" }), mediaType: "application/json" }] } } })
       .expect(200);
     expect(response.body.result.message.role).toBe("ROLE_AGENT");
     expect(response.body.result.message.parts[0].text).toContain("humanIdentityVerified");
+  });
+
+  it("rejects an unsupported A2A protocol version", async () => {
+    const response = await request(app).post("/api/a2a/recipient")
+      .set("A2A-Version", "0.3")
+      .send({ jsonrpc: "2.0", id: 1, method: "SendMessage", params: { message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "{}", mediaType: "application/json" }] } } })
+      .expect(400);
+    expect(response.body.error.code).toBe(-32009);
+    expect(response.body.error.data[0].reason).toBe("VERSION_NOT_SUPPORTED");
+  });
+
+  it("rejects malformed A2A params without invoking an agent", async () => {
+    const response = await request(app).post("/api/a2a/recipient")
+      .set("A2A-Version", "1.0")
+      .send({ jsonrpc: "2.0", id: 1, method: "SendMessage", params: {} })
+      .expect(200);
+    expect(response.body.error.code).toBe(-32602);
+    expect(response.body.error.data[0].reason).toBe("INVALID_PARAMS");
   });
 });

@@ -20,13 +20,15 @@ async function accessToken(): Promise<string> {
 export async function createOrder(mandate: GratitudeMandate): Promise<{ id: string; status: string; approveUrl: string }> {
   if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== 100) throw new PublicError("RAIL_REJECTED", "Only the fixed PayPal gratitude offer is accepted.");
   const token = await accessToken();
+  const sandboxOrigin = process.env.PAYPAL_ENV !== "live" ? process.env.PAYPAL_SANDBOX_RETURN_ORIGIN : undefined;
+  const returnProfile = sandboxOrigin ? new URL("/p/securedme", sandboxOrigin).href : mandate.profileUrl;
   const response = await fetch(`${endpoint()}/v2/checkout/orders`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "PayPal-Request-Id": mandate.idempotencyKey },
     body: JSON.stringify({
       intent: "CAPTURE",
       purchase_units: [{ reference_id: mandate.id, custom_id: mandate.id, description: "Voluntary gratitude tip", amount: { currency_code: "USD", value: "1.00" } }],
-      payment_source: { paypal: { experience_context: { shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW", return_url: `${mandate.profileUrl}?paypal=return`, cancel_url: `${mandate.profileUrl}?paypal=cancel` } } }
+      payment_source: { paypal: { experience_context: { shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW", return_url: `${returnProfile}?paypal=return`, cancel_url: `${returnProfile}?paypal=cancel` } } }
     }),
     signal: AbortSignal.timeout(8_000)
   });

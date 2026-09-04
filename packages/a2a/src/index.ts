@@ -1,4 +1,5 @@
-import { AgentCard, Message, Role, generateAgentCardSignature } from "@a2a-js/sdk";
+import { AgentCard, Message, Role, SendMessageRequest, generateAgentCardSignature } from "@a2a-js/sdk";
+import { ClientFactory } from "@a2a-js/sdk/client";
 import { AgentEvent, AgentExecutor, ExecutionEventBus, RequestContext } from "@a2a-js/sdk/server";
 import { importJWK, type JWK } from "jose";
 
@@ -38,11 +39,16 @@ export async function signedAgentCard(kind: AgentKind, origin: string, privateJw
 }
 
 export class ImmediateAgentExecutor implements AgentExecutor {
-  constructor(private readonly kind: AgentKind, private readonly inspect: () => Record<string, unknown>) {}
+  constructor(private readonly respond: (input: unknown) => Promise<Record<string, unknown>>) {}
   async execute(context: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
-    const statement = this.kind === "payer"
-      ? { agent: "payer", authority: "stage-only", humanApprovalRequired: true, stagingEndpoint: "/api/intents/stage", interAgentStagingImplemented: false }
-      : { agent: "recipient", ...this.inspect(), humanIdentityVerified: false };
+    const parts = context.userMessage.parts;
+    let statement: Record<string, unknown>;
+    try {
+      if (parts.length !== 1 || parts[0]?.content?.$case !== "text") throw new Error("Expected one structured text part");
+      statement = await this.respond(JSON.parse(parts[0].content.value));
+    } catch (error) {
+      statement = { error: error && typeof error === "object" && "code" in error ? error.code : "RAIL_REJECTED", humanApprovalRequired: true };
+    }
     const message: Message = {
       messageId: crypto.randomUUID(),
       role: Role.ROLE_AGENT,
@@ -54,4 +60,15 @@ export class ImmediateAgentExecutor implements AgentExecutor {
     eventBus.publish(AgentEvent.message(message));
   }
   async cancelTask(_taskId: string, _eventBus: ExecutionEventBus): Promise<void> {}
+}
+
+export async function sendAgentMessage(card: AgentCard, input: unknown): Promise<Record<string, unknown>> {
+  const client = await new ClientFactory().createFromAgentCard(card);
+  const result = await client.sendMessage(SendMessageRequest.fromJSON({ message: {
+    messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: JSON.stringify(input), mediaType: "application/json" }]
+  } }), { signal: AbortSignal.timeout(8_000) });
+  if (!("messageId" in result) || result.role !== Role.ROLE_AGENT || result.parts.length !== 1 || result.parts[0]?.content?.$case !== "text") {
+    throw new Error("Expected immediate agent Message");
+  }
+  return JSON.parse(result.parts[0].content.value) as Record<string, unknown>;
 }

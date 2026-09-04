@@ -1,5 +1,5 @@
 import bs58 from "bs58";
-import { PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
+import { PublicError, sha256, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 export async function verifySolanaTransaction(signature: string, mandate: GratitudeMandate, recipient: string): Promise<void> {
   if (mandate.rail !== "solana-devnet" || mandate.amount.currency !== "SOL") throw new PublicError("RAIL_REJECTED", "The mandate is not a Solana devnet mandate.");
@@ -10,10 +10,19 @@ export async function verifySolanaTransaction(signature: string, mandate: Gratit
     signal: AbortSignal.timeout(8_000)
   });
   if (!rpcResponse.ok) throw new PublicError("PAYMENT_NOT_CONFIRMED", "Solana devnet RPC was unavailable.", 502);
-  const payload = await rpcResponse.json() as { result?: { blockTime?: number; meta?: { err?: unknown; preBalances?: number[]; postBalances?: number[] }; transaction?: { message?: { accountKeys?: Array<string | { pubkey?: string }> } } } };
+  const payload = await rpcResponse.json() as { result?: { blockTime?: number; meta?: { err?: unknown; preBalances?: number[]; postBalances?: number[] }; transaction?: { signatures?: string[]; message?: { accountKeys?: Array<string | { pubkey?: string }>; instructions?: Array<{program?:string; programId?:string; parsed?: string | {type?: string; info?:{destination?:string; lamports?: number}}}> } } } };
   const transaction = payload.result;
   if (!transaction || transaction.meta?.err || !transaction.meta?.preBalances || !transaction.meta.postBalances) throw new PublicError("PAYMENT_NOT_CONFIRMED", "The devnet transaction is not finalized.", 409);
   const keys = (transaction.transaction?.message?.accountKeys ?? []).map((entry) => typeof entry === "string" ? entry : entry.pubkey ?? "");
+  const hash = sha256(mandate);
+  const reference = bs58.encode(Buffer.from(hash, "hex"));
+  const instructions = transaction.transaction?.message?.instructions ?? [];
+  const memos = instructions.filter(instruction => instruction.programId === "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+  if (!keys.includes(reference) || memos.length !== 1 || memos[0]?.parsed !== `thanks2go:${hash}`) throw new PublicError("REFERENCE_REUSED", "The transaction is not bound to this exact mandate.", 409);
+  if (transaction.transaction?.signatures?.[0] !== signature) throw new PublicError("PAYMENT_NOT_CONFIRMED", "The transaction signature does not match.", 409);
+  const transfers = instructions.filter(instruction => instruction.programId === "11111111111111111111111111111111" && typeof instruction.parsed === "object" && instruction.parsed.type === "transfer");
+  const transfer = transfers[0]?.parsed;
+  if (transfers.length !== 1 || typeof transfer !== "object" || transfer.info?.destination !== recipient || !Number.isSafeInteger(transfer.info.lamports) || BigInt(transfer.info.lamports!) !== BigInt(mandate.amount.atomicUnits)) throw new PublicError("PAYMENT_NOT_CONFIRMED", "The exact transfer instruction was not found.", 409);
   const recipientIndex = keys.indexOf(recipient);
   if (recipientIndex < 0) throw new PublicError("PAYMENT_NOT_CONFIRMED", "The devnet recipient does not match.", 409);
   const blockTime = (transaction.blockTime ?? 0) * 1000;

@@ -7,14 +7,14 @@
 | Agent initiates payment | WebMCP exposes no approval/capture/signing operation; PayPal must record payer approval. `humanApproved` is a caller assertion, not proof of a human | Source/API tests; provider approval checks |
 | Client changes amount/payee | PayPal value and description are server fixed; signed mandate bounds rail/amount/profile | Contract tests and provider response validation |
 | Duplicate PayPal operation | Stable `PayPal-Request-Id` per create/capture mandate | Sandbox retry test |
-| Mandate replay | Ten-minute expiry and provider checks; PayPal validates order binding before capture. Solana cross-mandate replay remains an open release blocker without a mandate-derived on-chain reference | Expiry/tamper and mocked provider tests; devnet replay evidence pending |
+| Mandate replay | Ten-minute expiry and provider checks; PayPal validates order binding before capture. Solana requires a mandate-hash reference and exact memo | Expiry/tamper, provider mocks and cross-mandate replay tests; real devnet evidence pending |
 | Receipt wrapper falsification | Every displayed receipt field, including confirmation time, must match the signed credential subject | Field substitution tests |
 | SSRF | No server endpoint fetches a user-controlled URL | Route review |
 | Payer PII leaks | API discards payer name/email and returns only a SHA-256 payer reference | Capture contract test |
 | False identity claim | UI says origin/destination control only and explicitly denies human identity verification | Content review |
 
-Known beta risk: Commerce Kit 0.1.1 is pinned. Its public callback exposes the transaction signature but not its internally generated Solana Pay reference. The server therefore binds the signed mandate to recipient, exact amount, finality, block time, and the unique transaction signature used as the receipt provider reference. It does not claim a mandate-derived on-chain reference.
+Known beta risk: Commerce Kit 0.1.1 is pinned. Its high-level tip button converts fiat-denominated tips and its transfer helper does not produce the exact native-SOL reference/memo contract required here. Thanks2Go therefore uses Commerce Kit's headless tip request with Gill's native System Program transfer, a read-only mandate-hash reference and one exact memo. The server validates recipient, amount, signature, finality, time window, reference and memo.
 
-Release blocker: two same-amount mandates with overlapping windows can currently cite the same Solana transaction. The signature alone is not a cross-mandate replay defense. Do not mark the Solana replay gate complete until the transaction includes a mandate-bound reference that the verifier checks.
+Release blocker: the binding and replay controls pass deterministic tests, but a real finalized devnet transaction has not yet been captured because the public faucet rejected the first smoke request. Do not claim live devnet evidence until a wallet completes this exact flow.
 
-A2A status: the two SDK endpoints and their card signatures work. The recipient response now derives claims from runtime configuration and a verified Ed25519 control proof. Payer-to-recipient request orchestration and structured intent processing are still release gates; a static `ROLE_AGENT` response is not evidence that those capabilities work.
+A2A status: the payer obtains the signed recipient card, verifies its service key, sends a real SDK `SendMessage` request over HTTP, compares the structured response with current configuration, then signs the mandate. Local integration covers the full chain; production verification awaits deployment of this revision.

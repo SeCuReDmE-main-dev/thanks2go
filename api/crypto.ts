@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { exportJWK, generateKeyPair, importJWK, jwtVerify, SignJWT, type JWK } from "jose";
-import { assertMandateActive, gratitudeMandateSchema, gratitudeReceiptSchema, PublicError, sha256, type GratitudeMandate, type GratitudeReceipt } from "../packages/contracts/src/index.js";
+import { assertMandateActive, gratitudeMandateSchema, gratitudeReceiptSchema, PublicError, sha256, type GratitudeMandate, type GratitudeReceipt, type GratitudeRail } from "../packages/contracts/src/index.js";
 
 type SigningKey = Awaited<ReturnType<typeof importJWK>>;
 type KeyMaterial = { privateKey: SigningKey; publicJwk: JWK; kid: string };
@@ -37,6 +37,49 @@ export async function signMandate(mandate: GratitudeMandate): Promise<string> {
     .setExpirationTime(Math.floor(Date.parse(mandate.expiresAt) / 1000))
     .setJti(mandate.id)
     .sign(privateKey);
+}
+
+export type RecipientControlClaims = {
+  agent: "recipient";
+  profileUrl: string;
+  rail: GratitudeRail;
+  recipient: string;
+  originControlled: true;
+  solanaControlProofVerified: boolean;
+  humanIdentityVerified: false;
+  recipientAttestationHash: string;
+};
+
+export async function issueRecipientControlCredential(claims: RecipientControlClaims, now = new Date()): Promise<string> {
+  const { privateKey, kid } = await keyMaterial();
+  const validFrom = now.toISOString();
+  const validUntil = new Date(now.getTime() + 600_000).toISOString();
+  const vc = {
+    "@context": ["https://www.w3.org/ns/credentials/v2"],
+    type: ["VerifiableCredential", "RecipientControlCredential"],
+    issuer: "https://thanks2go.securedme.ca",
+    validFrom, validUntil,
+    credentialSubject: { id: claims.profileUrl, ...claims }
+  };
+  return new SignJWT(vc)
+    .setProtectedHeader({ alg: "ES256", kid, typ: "vc+jwt" })
+    .setIssuer("https://thanks2go.securedme.ca")
+    .setSubject(claims.profileUrl)
+    .setIssuedAt(Math.floor(now.getTime() / 1000))
+    .setExpirationTime(Math.floor(Date.parse(validUntil) / 1000))
+    .sign(privateKey);
+}
+
+export async function verifyRecipientControlCredential(token: string, expected: RecipientControlClaims): Promise<void> {
+  const { publicJwk } = await keyMaterial();
+  const { payload, protectedHeader } = await jwtVerify(token, await importJWK(publicJwk, "ES256"), {
+    issuer: "https://thanks2go.securedme.ca", subject: expected.profileUrl, algorithms: ["ES256"], typ: "vc+jwt"
+  });
+  const subject = payload.credentialSubject as Record<string, unknown> | undefined;
+  if (protectedHeader.typ !== "vc+jwt" || !subject || subject.id !== expected.profileUrl ||
+      Object.entries(expected).some(([key, value]) => subject[key] !== value)) {
+    throw new PublicError("RECIPIENT_NOT_VERIFIED", "The recipient credential does not match current control claims.", 409);
+  }
 }
 
 export async function verifyMandate(token: string): Promise<GratitudeMandate> {

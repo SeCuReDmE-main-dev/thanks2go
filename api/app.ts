@@ -1,12 +1,13 @@
 import compression from "compression";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
-import type { AgentCard } from "@a2a-js/sdk";
+import bs58 from "bs58";
+import { AgentCard, verifyAgentCardSignature } from "@a2a-js/sdk";
 import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/server/express";
-import { ImmediateAgentExecutor, signedAgentCard, unsignedAgentCard, type AgentKind } from "../packages/a2a/src/index.js";
+import { ImmediateAgentExecutor, signedAgentCard, unsignedAgentCard, sendAgentMessage, type AgentKind } from "../packages/a2a/src/index.js";
 import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "../packages/contracts/src/index.js";
-import { hashPayerReference, issueReceiptCredential, keyMaterial, signMandate, verifyMandate, verifyReceiptCredential } from "./crypto.js";
+import { hashPayerReference, issueReceiptCredential, issueRecipientControlCredential, keyMaterial, signMandate, verifyMandate, verifyReceiptCredential, verifyRecipientControlCredential, type RecipientControlClaims } from "./crypto.js";
 import { captureOrder, createOrder } from "./paypal.js";
 import { verifySolanaTransaction } from "./solana.js";
 import { verifyRecipientControl } from "./recipient.js";
@@ -20,7 +21,7 @@ function profile() {
   return publicProfileSchema.parse({
     version: "1", slug: "securedme", displayName: "Jean-Sébastien Beaulieu / SecuredMe", profileUrl: `${origin}/p/securedme`,
     attestation: { originControlled: true, railDestinationControlled: false, humanIdentityVerified: false },
-    paypal: { offerId: "gratitude-usd-1", displayAmount: "$1.00 USD", enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID && process.env.PAYPAL_T2G_CLIENT_SECRET) },
+    paypal: { offerId: "gratitude-usd-1", displayAmount: "$1.00 USD", enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID && process.env.PAYPAL_T2G_CLIENT_SECRET), environment: process.env.PAYPAL_ENV === "live" ? "live" : "sandbox" },
     solana: { network: "devnet", recipient: solanaControlled ? recipient : "", presets: ["0.001", "0.005", "0.01"] }
   });
 }
@@ -35,7 +36,54 @@ async function card(kind: AgentKind): Promise<AgentCard> {
   return signedAgentCard(kind, origin, JSON.parse(privateText), keys.kid);
 }
 
-export async function createApp() {
+export async function createApp(options: { agentOrigin?: () => string } = {}) {
+  const transportOrigin = () => process.env.VERCEL_ENV === "production" ? origin : options.agentOrigin?.() ?? process.env.A2A_LOCAL_ORIGIN ?? "http://127.0.0.1:3001";
+  async function askAgent(kind: AgentKind, input: unknown) {
+    // Endpoint comes only from server configuration, never from the caller.
+    const response = await fetch(`${transportOrigin()}/agents/${kind}/.well-known/agent-card.json`, {signal:AbortSignal.timeout(8_000)});
+    if (!response.ok) throw new PublicError("RECIPIENT_NOT_VERIFIED", "Agent card is unavailable.", 503);
+    const agentCard = AgentCard.fromJSON(await response.json());
+    if (process.env.ES256_PRIVATE_JWK) {
+      const keys = await keyMaterial();
+      await verifyAgentCardSignature(async (kid, jku) => {
+        if (kid !== keys.kid || jku !== `${origin}/.well-known/jwks.json`) throw new Error("Unknown agent signer");
+        return keys.publicJwk;
+      })(agentCard);
+    }
+    // Local tests use a loopback transport after verifying the canonical signed card.
+    const transportCard = process.env.VERCEL_ENV === "production" ? agentCard : {...agentCard, supportedInterfaces: unsignedAgentCard(kind, transportOrigin()).supportedInterfaces};
+    const result = await sendAgentMessage(transportCard, input);
+    if (result.error) throw new PublicError("RECIPIENT_NOT_VERIFIED", "The agent could not verify this request.", 409);
+    return result;
+  }
+  function recipientClaims(input: unknown): RecipientControlClaims {
+    const request = stageIntentSchema.parse(input);
+    const current = profile();
+    if (request.profileUrl !== current.profileUrl) throw new PublicError("INVALID_PROFILE_URL", "Unknown gratitude profile.", 404);
+    const controlled = request.rail === "solana-devnet" ? Boolean(current.solana.recipient) : current.paypal.enabled;
+    if (!controlled) throw new PublicError("RECIPIENT_NOT_VERIFIED", "This rail is not configured or verified.", 409);
+    const recipient = request.rail === "solana-devnet" ? current.solana.recipient : "configured-paypal-merchant";
+    return { agent: "recipient", profileUrl: current.profileUrl, rail: request.rail, recipient,
+      originControlled: true, solanaControlProofVerified: request.rail === "solana-devnet", humanIdentityVerified: false,
+      recipientAttestationHash: sha256({ profile: current.profileUrl, recipient }) };
+  }
+  async function inspectRecipient(input: unknown): Promise<Record<string, unknown>> {
+    const claims = recipientClaims(input);
+    return { ...claims, credential: await issueRecipientControlCredential(claims) };
+  }
+  async function stageWithRecipient(input: unknown): Promise<Record<string, unknown>> {
+    const request = stageIntentSchema.parse(input);
+    const trust = await askAgent("recipient", request);
+    const credential = String(trust.credential ?? "");
+    const { credential: _credential, ...receivedClaims } = trust;
+    const expected = recipientClaims(request);
+    if (sha256(receivedClaims) !== sha256(expected)) throw new PublicError("RECIPIENT_NOT_VERIFIED", "Recipient response does not match current configuration.", 409);
+    await verifyRecipientControlCredential(credential, expected);
+    const mandate = newMandate(request, expected.recipientAttestationHash);
+    const mandateHash = sha256(mandate);
+    return { mandate, mandateHash, reference: bs58.encode(Buffer.from(mandateHash, "hex")), mandateToken: await signMandate(mandate), state: "STAGED", humanApprovalRequired: true,
+      agentExchange: { payer: "stage-only", recipient: trust } };
+  }
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
@@ -55,11 +103,11 @@ export async function createApp() {
     try {
       const input = stageIntentSchema.parse(request.body);
       const currentProfile = profile();
+      if (input.profileUrl !== currentProfile.profileUrl) throw new PublicError("INVALID_PROFILE_URL", "Unknown gratitude profile.", 404);
       if (!currentProfile.attestation.originControlled) throw new PublicError("RECIPIENT_NOT_VERIFIED", "The declared origin is not controlled.", 409);
       if (input.rail === "solana-devnet" && !currentProfile.solana.recipient) throw new PublicError("RECIPIENT_NOT_VERIFIED", "The devnet destination is not configured.", 409);
       if (input.rail === "paypal" && !currentProfile.paypal.enabled) throw new PublicError("RAIL_REJECTED", "PayPal is not configured.", 503);
-      const mandate = newMandate(input, sha256({ profile: currentProfile.profileUrl, recipient: input.rail === "paypal" ? "configured-paypal-merchant" : currentProfile.solana.recipient }));
-      response.status(201).json({ mandate, mandateToken: await signMandate(mandate), state: "STAGED", humanApprovalRequired: true });
+      response.status(201).json(await askAgent("payer", input));
     } catch (error) { next(error); }
   });
   app.post("/api/paypal/orders", async (request, response, next) => {
@@ -103,13 +151,15 @@ export async function createApp() {
 
   for (const kind of ["payer", "recipient"] as const) {
     const agentCard = await card(kind);
-    const handler = new DefaultRequestHandler(agentCard, new InMemoryTaskStore(), new ImmediateAgentExecutor(kind, () => {
-      const current = profile();
-      return { profileUrl: current.profileUrl, originControlled: current.attestation.originControlled,
-        railDestinationControlled: current.attestation.railDestinationControlled,
-        solanaDestinationControlled: Boolean(current.solana.recipient), paypalConfigured: current.paypal.enabled };
-    }));
+    const handler = new DefaultRequestHandler(agentCard, new InMemoryTaskStore(), new ImmediateAgentExecutor(kind === "payer" ? stageWithRecipient : inspectRecipient));
     app.use(`/agents/${kind}/.well-known/agent-card.json`, agentCardHandler({ agentCardProvider: handler }));
+    app.use(`/api/a2a/${kind}`, (request, response, next) => {
+      if (request.get("A2A-Version") === "1.0") return next();
+      response.status(400).json({ jsonrpc: "2.0", id: request.body?.id ?? null, error: {
+        code: -32009, message: "Only A2A protocol version 1.0 is supported.",
+        data: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "VERSION_NOT_SUPPORTED", domain: "a2a-protocol.org" }]
+      } });
+    });
     app.use(`/api/a2a/${kind}`, jsonRpcHandler({ requestHandler: handler, userBuilder: UserBuilder.noAuthentication, legacyCompat: { enabled: false } }));
   }
 

@@ -2,6 +2,8 @@ interface WebMcpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean };
   execute(input: Record<string, unknown>): unknown | Promise<unknown>;
 }
 

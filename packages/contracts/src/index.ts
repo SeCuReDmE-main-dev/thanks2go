@@ -66,7 +66,7 @@ export const publicProfileSchema = z.object({
     railDestinationControlled: z.boolean(),
     humanIdentityVerified: z.literal(false)
   }),
-  paypal: z.object({ offerId: z.literal("gratitude-usd-1"), displayAmount: z.literal("$1.00 USD"), enabled: z.boolean() }),
+  paypal: z.object({ offerId: z.literal("gratitude-usd-1"), displayAmount: z.literal("$1.00 USD"), enabled: z.boolean(), environment: z.enum(["live", "sandbox"]) }),
   solana: z.object({ network: z.literal("devnet"), recipient: z.string(), presets: z.tuple([z.literal("0.001"), z.literal("0.005"), z.literal("0.01")]) })
 });
 

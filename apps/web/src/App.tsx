@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { PaymentButton } from "@solana-commerce/kit";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { DevnetStage } from "./solana-payment";
 import QRCode from "qrcode";
 import { registerThanks2GoTools } from "./webmcp";
 
 type Profile = {
   profileUrl: string; displayName: string;
   attestation: { originControlled: boolean; railDestinationControlled: boolean; humanIdentityVerified: false };
-  paypal: { enabled: boolean; displayAmount: string };
+  paypal: { enabled: boolean; displayAmount: string; environment: "live" | "sandbox" };
   solana: { network: "devnet"; recipient: string; presets: [string, string, string] };
 };
-type Stage = { mandateToken: string; mandate: { id: string; rail: string; amount: unknown; expiresAt: string }; reference?: string };
+type Stage = DevnetStage & { mandateToken: string };
 
 const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(path, init);
@@ -25,17 +25,28 @@ export default function App() {
   const [status, setStatus] = useState("Choose a rail. Nothing happens without your click.");
   const [busy, setBusy] = useState(false);
   const [profileQr, setProfileQr] = useState("");
+  const [receipt, setReceipt] = useState<Record<string, unknown>>();
+  const paymentLock = useRef(false);
+  const [wallets, setWallets] = useState<string[]>([]);
   const query = useMemo(() => new URLSearchParams(location.search), []);
+  useEffect(() => {
+    if (query.get("paypal") === "cancel") {
+      sessionStorage.removeItem("thanks2go:paypal-mandate");
+      setStatus("PayPal checkout cancelled. No capture was requested by Thanks2Go.");
+    }
+  }, [query]);
 
   useEffect(() => {
     api<Profile>("/api/profiles/securedme").then(setProfile).catch((error) => setStatus(error.message));
   }, []);
   useEffect(() => {
     if (!profile) return;
-    QRCode.toDataURL(profile.profileUrl, { errorCorrectionLevel: "M", margin: 1, width: 180, color: { dark: "#132015", light: "#eaff86" } }).then(setProfileQr).catch(() => undefined);
-    let controller: AbortController | undefined;
-    registerThanks2GoTools(profile.profileUrl).then((value) => { controller = value; }).catch(() => undefined);
-    return () => controller?.abort();
+    QRCode.toDataURL(profile.profileUrl, { errorCorrectionLevel: "M", margin: 1, width: 180, color: { dark: "#030914", light: "#ffffff" } }).then(setProfileQr).catch(() => undefined);
+    const lifecycle = new AbortController();
+    registerThanks2GoTools(profile.profileUrl, (notice) => {
+      setStatus(notice.message);
+    }, lifecycle.signal).catch(() => undefined);
+    return () => lifecycle.abort();
   }, [profile]);
 
   async function stageSolana(amount: string) {
@@ -50,47 +61,79 @@ export default function App() {
   }
 
   async function startPayPal() {
-    if (!profile) return;
+    if (!profile || paymentLock.current) return;
+    paymentLock.current = true;
     setBusy(true);
     try {
-      const stage = await api<Stage>("/api/intents/stage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileUrl: profile.profileUrl, rail: "paypal" }) });
-      sessionStorage.setItem("thanks2go:paypal-mandate", stage.mandateToken);
-      const order = await api<{ approveUrl: string }>("/api/paypal/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken: stage.mandateToken, humanApproved: true }) });
+      let mandateToken = sessionStorage.getItem("thanks2go:paypal-mandate");
+      if (!mandateToken) {
+        const stage = await api<{mandateToken: string}>("/api/intents/stage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileUrl: profile.profileUrl, rail: "paypal" }) });
+        mandateToken = stage.mandateToken;
+        sessionStorage.setItem("thanks2go:paypal-mandate", mandateToken);
+      }
+      const order = await api<{ approveUrl: string }>("/api/paypal/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken, humanApproved: true }) });
       location.assign(order.approveUrl);
-    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to open PayPal"); setBusy(false); }
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes("expired")) sessionStorage.removeItem("thanks2go:paypal-mandate");
+      setStatus(error instanceof Error ? error.message : "Unable to open PayPal"); setBusy(false); paymentLock.current = false;
+    }
   }
 
   async function capturePayPal() {
+    if (paymentLock.current || receipt) return;
     const orderId = query.get("token");
     const mandateToken = sessionStorage.getItem("thanks2go:paypal-mandate");
     if (!orderId || !mandateToken) return;
+    paymentLock.current = true;
     setBusy(true);
     try {
       const receipt = await api<Record<string, unknown>>(`/api/paypal/orders/${encodeURIComponent(orderId)}/capture`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken, humanApproved: true }) });
       sessionStorage.removeItem("thanks2go:paypal-mandate");
+      setReceipt(receipt);
       setStatus(`Confirmed by PayPal. Receipt ${String(receipt.providerReference).slice(0, 12)}… contains no payer name or email.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Capture was not confirmed"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); paymentLock.current = false; }
   }
 
   async function verifySolana(signature: string) {
     if (!solStage) { setStatus("No active devnet mandate. Stage the selected amount first."); return; }
     try {
-      await api("/api/solana/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken: solStage.mandateToken, signature }) });
+      const confirmed = await api<Record<string, unknown>>("/api/solana/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken: solStage.mandateToken, signature }) });
+      setReceipt(confirmed);
       setStatus(`Solana devnet demonstration confirmed: ${signature.slice(0, 12)}… This is not production money.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Devnet verification failed"); }
+  }
+
+  async function openDevnetWallet(walletName: string) {
+    if (!profile || !solStage || paymentLock.current) return;
+    paymentLock.current = true; setBusy(true);
+    try {
+      const {payDevnetTip} = await import("./solana-payment");
+      const signature = await payDevnetTip(walletName, profile.solana.recipient, solStage);
+      setStatus("Devnet transaction sent. Waiting for finalization before verifying the receipt.");
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const response = await fetch("/api/solana/verify", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mandateToken:solStage.mandateToken,signature})});
+        const value = await response.json();
+        if (response.ok) {setReceipt(value); setStatus(`Solana devnet confirmed: ${signature.slice(0,12)}…`); return;}
+        if (!String(value.message).includes("not finalized")) throw new Error(value.message);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      setStatus(`Finalization pending. Keep this devnet transaction signature: ${signature}`);
+    } catch(error) {setStatus(error instanceof Error ? error.message : "The wallet did not complete the devnet payment.");}
+    finally {paymentLock.current = false; setBusy(false);}
   }
 
   if (!profile) return <main id="main" className="shell"><p role="status">{status}</p></main>;
   const paypalReturn = query.get("paypal") === "return" && Boolean(query.get("token"));
 
   return <>
-    <header className="topbar"><a className="brand" href="/p/securedme">Thanks2Go</a><span>Gratitude stays human.</span></header>
+    <div className="identity-strip">A SECUREDME EXPERIMENT <span>HUMAN FIRST. GRATITUDE BY CHOICE.</span></div>
+    <header className="topbar"><a className="brand" href="/p/securedme">Thanks<span>2Go</span></a><nav aria-label="Main navigation"><a href="#rails">Give thanks</a><a href="https://securedme.ca">SecuredMe ↗</a></nav></header>
     <main id="main" className="shell">
       <section className="hero" aria-labelledby="title">
-        <p className="eyebrow">A generosity experiment by SecuredMe</p>
-        <h1 id="title">A small thank-you.<br/><em>Explicitly chosen.</em></h1>
-        <p className="lede">Thanks2Go lets a creator declare one canonical gratitude profile. Agents can inspect and stage. Only you can approve a rail.</p>
+        <div><p className="eyebrow">Built with passion. Shared with gratitude.</p>
+        <h1 id="title">A small thank-you.<br/><em>A human choice.</em></h1></div>
+        <div className="hero-intro"><p className="lede">Someone helped you move forward. Send a small, voluntary thank-you—or explore how gratitude works on Solana devnet.</p><p>You choose the recipient and the amount. Every payment needs your approval.</p><a className="button-link" href="#rails">Choose your gesture <span aria-hidden="true">↓</span></a></div>
       </section>
 
       <section className="identity" aria-labelledby="recipient-title">
@@ -100,31 +143,37 @@ export default function App() {
       </section>
 
       <section id="rails" className="rails" tabIndex={-1} aria-labelledby="rails-title">
-        <div className="section-heading"><p className="eyebrow">Two rails, two meanings</p><h2 id="rails-title">Choose your gesture</h2></div>
+        <div className="section-heading"><p className="eyebrow">Two rails, two meanings</p><h2 id="rails-title">Choose your gesture</h2><p>{profile.paypal.environment === "live" ? "One real tip." : "One PayPal sandbox test."} One devnet experiment. Always your choice.</p></div>
+        <div className="rail-grid">
         <article className="rail paypal">
-          <p className="rail-number">01 / LIVE</p><h3>One real dollar</h3>
+          <p className="rail-number">01 / {profile.paypal.environment.toUpperCase()}</p><h3>{profile.paypal.environment === "live" ? "One real dollar" : "One test dollar — sandbox"}</h3>
+          {profile.paypal.environment === "sandbox" && <p>Sandbox test: no real money is transferred.</p>}
           <p>A fixed <strong>{profile.paypal.displayAmount}</strong> voluntary gratitude tip through PayPal. No good, service, tax receipt, or charitable donation is promised.</p>
-          {paypalReturn ? <button disabled={busy} onClick={capturePayPal}>Approve final capture of $1</button> : <button disabled={busy || !profile.paypal.enabled} onClick={startPayPal}>{profile.paypal.enabled ? "Continue visibly to PayPal" : "PayPal configuration pending"}</button>}
+          {paypalReturn ? <button disabled={busy || Boolean(receipt)} onClick={capturePayPal}>{receipt ? "Payment confirmed" : "Approve final capture of $1"}</button> : <button disabled={busy || !profile.paypal.enabled} onClick={startPayPal}>{profile.paypal.enabled ? "Continue visibly to PayPal" : "PayPal configuration pending"}</button>}
         </article>
         <article className="rail solana">
           <p className="rail-number">02 / DEVNET DEMO</p><h3>Try a Solana thank-you</h3>
           <p>This uses Solana Commerce Kit in tip mode on <strong>devnet only</strong>. Devnet tokens have no monetary value.</p>
           <fieldset><legend>Choose a bounded demo amount</legend>{profile.solana.presets.map((amount) => <label key={amount}><input type="radio" name="sol" value={amount} checked={solAmount === amount} onChange={() => { setSolAmount(amount); setSolStage(undefined); }} /> {amount} SOL</label>)}</fieldset>
           <button className="secondary" disabled={busy || !profile.solana.recipient} onClick={() => stageSolana(solAmount)}>{solStage ? "Mandate staged" : "Stage devnet mandate"}</button>
-          {solStage && <PaymentButton
-            config={{ merchant: { name: "SecuredMe", wallet: profile.solana.recipient, description: "Voluntary gratitude — devnet demonstration" }, mode: "tip", network: "devnet", allowedMints: ["SOL"], showQR: false, showMerchantInfo: true, debug: false }}
-            onPayment={(amount: number) => { if (amount.toFixed(3) !== Number(solAmount).toFixed(3)) throw new Error("Amount differs from the staged mandate"); }}
-            onPaymentSuccess={verifySolana}
-            onPaymentError={(error: Error) => setStatus(error.message)}
-            onCancel={() => setStatus("Solana devnet action cancelled. Nothing was sent.")}
-          >
-            <button>Open wallet for staged devnet tip</button>
-          </PaymentButton>}
+          {solStage && <div><button disabled={busy} onClick={async () => {
+            const {availableDevnetWallets} = await import("./solana-payment");
+            const names = availableDevnetWallets().map(wallet => wallet.name); setWallets(names);
+            setStatus(names.length ? "Choose a wallet. It will ask you to approve the exact devnet amount." : "No compatible devnet wallet found. Open your Solana wallet with devnet enabled and refresh this list.");
+          }}>Find devnet wallets</button>{wallets.map(wallet => <button key={wallet} disabled={busy} onClick={() => openDevnetWallet(wallet)}>Approve {solAmount} SOL with {wallet}</button>)}</div>}
         </article>
+        </div>
       </section>
 
       <p className="status" role="status" aria-live="polite">{status}</p>
-      <section className="boundary"><h2>What agents can—and cannot—do</h2><p>A2A and experimental WebMCP tools may inspect this profile, stage an exact ten-minute mandate, open this visible handoff, and verify a receipt. They cannot click approval, create or capture PayPal autonomously, or sign a wallet transaction.</p></section>
+      {receipt && <section className="receipt" aria-label="Your receipt"><h2>Your signed receipt</h2><p>Keep this receipt to verify the provider reference later. It contains no payer name or email.</p><button onClick={async () => {
+        try { await api("/api/receipts/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(receipt) }); setStatus("Receipt signature and all receipt fields verified."); }
+        catch { setStatus("Receipt verification failed."); }
+      }}>Verify this receipt</button><button onClick={() => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(receipt, null, 2)], {type:"application/json"}));
+        const link = document.createElement("a"); link.href = url; link.download = "thanks2go-receipt.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }}>Download receipt</button></section>}
+      <section className="boundary"><p className="eyebrow">Human first, by design</p><h2>Agents prepare. You approve.</h2><p>A2A and experimental WebMCP tools may inspect this profile, stage an exact ten-minute mandate, open this visible handoff, and verify a receipt. They cannot click approval, create or capture PayPal autonomously, or sign a wallet transaction.</p></section>
     </main>
     <footer><span>Thanks2Go · MIT · 2026</span><a href="https://github.com/SeCuReDmE-main-dev/thanks2go">Source and threat model</a></footer>
   </>;

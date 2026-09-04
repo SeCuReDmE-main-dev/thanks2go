@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newMandate, sha256 } from "@thanks2go/contracts";
-import { issueReceiptCredential, signMandate, verifyMandate, verifyReceiptCredential } from "../api/crypto.js";
+import { issueReceiptCredential, issueRecipientControlCredential, signMandate, verifyMandate, verifyReceiptCredential, verifyRecipientControlCredential, type RecipientControlClaims } from "../api/crypto.js";
 
 describe("signed mandates and credentials", () => {
   it("binds every displayed receipt field to its signature", async () => {
@@ -27,5 +27,14 @@ describe("signed mandates and credentials", () => {
     const credential = await issueReceiptCredential(mandate, "provider-1", "confirmed");
     expect(credential.split(".")).toHaveLength(3);
     expect(sha256(mandate)).toHaveLength(64);
+  });
+
+  it("binds recipient control claims in a short-lived W3C credential", async () => {
+    const claims: RecipientControlClaims = { agent:"recipient", profileUrl:"https://thanks2go.securedme.ca/p/securedme", rail:"solana-devnet",
+      recipient:"6ywCP21EgS6a7y752rHT38qDypsb9NNLi2Db5iYXd9qj", originControlled:true,
+      solanaControlProofVerified:true, humanIdentityVerified:false, recipientAttestationHash:"f".repeat(64) };
+    const credential = await issueRecipientControlCredential(claims);
+    await expect(verifyRecipientControlCredential(credential, claims)).resolves.toBeUndefined();
+    await expect(verifyRecipientControlCredential(credential, {...claims, recipient:"attacker"})).rejects.toThrow();
   });
 });
