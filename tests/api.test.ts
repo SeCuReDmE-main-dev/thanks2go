@@ -8,7 +8,7 @@ beforeAll(async () => {
   const pair = await generateKeyPair("ES256", { extractable: true });
   process.env.ES256_PRIVATE_JWK = JSON.stringify(await exportJWK(pair.privateKey));
   process.env.ES256_KEY_ID = "thanks2go-test";
-  process.env.SOLANA_DEVNET_RECIPIENT = "11111111111111111111111111111111";
+  process.env.SOLANA_DEVNET_RECIPIENT = "6ywCP21EgS6a7y752rHT38qDypsb9NNLi2Db5iYXd9qj";
   process.env.PAYPAL_T2G_CLIENT_ID = "configured-for-contract-test";
   app = await (await import("../api/app.js")).createApp();
 });

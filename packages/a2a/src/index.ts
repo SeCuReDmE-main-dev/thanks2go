@@ -38,11 +38,11 @@ export async function signedAgentCard(kind: AgentKind, origin: string, privateJw
 }
 
 export class ImmediateAgentExecutor implements AgentExecutor {
-  constructor(private readonly kind: AgentKind) {}
+  constructor(private readonly kind: AgentKind, private readonly inspect: () => Record<string, unknown>) {}
   async execute(context: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
     const statement = this.kind === "payer"
-      ? { agent: "payer", authority: "stage-only", humanApprovalRequired: true }
-      : { agent: "recipient", originControlled: true, railDestinationControlled: true, humanIdentityVerified: false };
+      ? { agent: "payer", authority: "stage-only", humanApprovalRequired: true, stagingEndpoint: "/api/intents/stage", interAgentStagingImplemented: false }
+      : { agent: "recipient", ...this.inspect(), humanIdentityVerified: false };
     const message: Message = {
       messageId: crypto.randomUUID(),
       role: Role.ROLE_AGENT,

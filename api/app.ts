@@ -1,26 +1,27 @@
 import compression from "compression";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
-import { importJWK } from "jose";
 import type { AgentCard } from "@a2a-js/sdk";
 import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/server/express";
 import { ImmediateAgentExecutor, signedAgentCard, unsignedAgentCard, type AgentKind } from "../packages/a2a/src/index.js";
 import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "../packages/contracts/src/index.js";
-import { hashPayerReference, issueReceiptCredential, keyMaterial, signMandate, verifyMandate } from "./crypto.js";
+import { hashPayerReference, issueReceiptCredential, keyMaterial, signMandate, verifyMandate, verifyReceiptCredential } from "./crypto.js";
 import { captureOrder, createOrder } from "./paypal.js";
 import { verifySolanaTransaction } from "./solana.js";
+import { verifyRecipientControl } from "./recipient.js";
 
 const origin = process.env.PUBLIC_ORIGIN ?? "https://thanks2go.securedme.ca";
 const allowedOrigins = new Set([origin, ...(process.env.VERCEL_ENV === "production" ? [] : ["http://localhost:5173", "http://127.0.0.1:5173"])]);
 
 function profile() {
   const recipient = process.env.SOLANA_DEVNET_RECIPIENT ?? "";
+  const solanaControlled = verifyRecipientControl(recipient);
   return publicProfileSchema.parse({
     version: "1", slug: "securedme", displayName: "Jean-Sébastien Beaulieu / SecuredMe", profileUrl: `${origin}/p/securedme`,
-    attestation: { originControlled: true, railDestinationControlled: Boolean(recipient && process.env.PAYPAL_T2G_CLIENT_ID), humanIdentityVerified: false },
-    paypal: { offerId: "gratitude-usd-1", displayAmount: "$1.00 USD", enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID) },
-    solana: { network: "devnet", recipient, presets: ["0.001", "0.005", "0.01"] }
+    attestation: { originControlled: true, railDestinationControlled: false, humanIdentityVerified: false },
+    paypal: { offerId: "gratitude-usd-1", displayAmount: "$1.00 USD", enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID && process.env.PAYPAL_T2G_CLIENT_SECRET) },
+    solana: { network: "devnet", recipient: solanaControlled ? recipient : "", presets: ["0.001", "0.005", "0.01"] }
   });
 }
 
@@ -77,8 +78,9 @@ export async function createApp() {
       const result = await captureOrder(request.params.id!, mandate);
       const providerReference = result.purchase_units?.[0]?.payments?.captures?.[0]?.id ?? result.id;
       const payerReference = hashPayerReference(result.payer?.payer_id);
-      const credential = await issueReceiptCredential(mandate, providerReference, "confirmed", payerReference);
-      response.json({ version: "1", mandateHash: sha256(mandate), rail: "paypal", status: "confirmed", providerReference, ...(payerReference ? { payerReference } : {}), confirmedAt: new Date().toISOString(), credential });
+      const confirmedAt = new Date().toISOString();
+      const credential = await issueReceiptCredential(mandate, providerReference, "confirmed", payerReference, confirmedAt);
+      response.json({ version: "1", mandateHash: sha256(mandate), rail: "paypal", status: "confirmed", providerReference, ...(payerReference ? { payerReference } : {}), confirmedAt, credential });
     } catch (error) { next(error); }
   });
   app.post("/api/solana/verify", async (request, response, next) => {
@@ -86,24 +88,27 @@ export async function createApp() {
       const mandate = await verifyMandate(String(request.body?.mandateToken ?? ""));
       await verifySolanaTransaction(String(request.body?.signature ?? ""), mandate, profile().solana.recipient);
       const providerReference = String(request.body.signature);
-      const credential = await issueReceiptCredential(mandate, providerReference, "confirmed");
-      response.json({ version: "1", mandateHash: sha256(mandate), rail: "solana-devnet", status: "confirmed", providerReference, confirmedAt: new Date().toISOString(), credential });
+      const confirmedAt = new Date().toISOString();
+      const credential = await issueReceiptCredential(mandate, providerReference, "confirmed", undefined, confirmedAt);
+      response.json({ version: "1", mandateHash: sha256(mandate), rail: "solana-devnet", status: "confirmed", providerReference, confirmedAt, credential });
     } catch (error) { next(error); }
   });
   app.post("/api/receipts/verify", async (request, response, next) => {
     try {
-      const receipt = gratitudeReceiptSchema.parse(request.body);
-      const { publicJwk } = await keyMaterial();
-      const { jwtVerify } = await import("jose");
-      const verified = await jwtVerify(receipt.credential, await importJWK(publicJwk, "ES256"), { issuer: origin });
-      response.json({ valid: verified.protectedHeader.typ === "vc+jwt", receipt });
+      const receipt = await verifyReceiptCredential(request.body);
+      response.json({ valid: true, receipt });
     } catch (error) { next(error); }
   });
   app.get("/.well-known/jwks.json", async (_request, response, next) => { try { const { publicJwk } = await keyMaterial(); response.json({ keys: [publicJwk] }); } catch (error) { next(error); } });
 
   for (const kind of ["payer", "recipient"] as const) {
     const agentCard = await card(kind);
-    const handler = new DefaultRequestHandler(agentCard, new InMemoryTaskStore(), new ImmediateAgentExecutor(kind));
+    const handler = new DefaultRequestHandler(agentCard, new InMemoryTaskStore(), new ImmediateAgentExecutor(kind, () => {
+      const current = profile();
+      return { profileUrl: current.profileUrl, originControlled: current.attestation.originControlled,
+        railDestinationControlled: current.attestation.railDestinationControlled,
+        solanaDestinationControlled: Boolean(current.solana.recipient), paypalConfigured: current.paypal.enabled };
+    }));
     app.use(`/agents/${kind}/.well-known/agent-card.json`, agentCardHandler({ agentCardProvider: handler }));
     app.use(`/api/a2a/${kind}`, jsonRpcHandler({ requestHandler: handler, userBuilder: UserBuilder.noAuthentication, legacyCompat: { enabled: false } }));
   }

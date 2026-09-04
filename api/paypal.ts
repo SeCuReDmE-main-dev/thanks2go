@@ -1,4 +1,4 @@
-import { PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
+import { assertMandateActive, PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 const endpoint = () => process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
@@ -36,19 +36,43 @@ export async function createOrder(mandate: GratitudeMandate): Promise<{ id: stri
   return { id: body.id, status: body.status ?? "CREATED", approveUrl };
 }
 
-export type PayPalCapture = { id: string; status: string; payer?: { payer_id?: string }; purchase_units?: Array<{ reference_id?: string; payments?: { captures?: Array<{ id?: string; status?: string; amount?: { currency_code?: string; value?: string } }> } }> };
+export type PayPalCapture = { id: string; status: string; intent?: string; payer?: { payer_id?: string }; purchase_units?: Array<{ reference_id?: string; custom_id?: string; amount?: { currency_code?: string; value?: string }; payments?: { captures?: Array<{ id?: string; status?: string; amount?: { currency_code?: string; value?: string } }> } }> };
+
+function assertConfirmed(body: PayPalCapture, mandate: GratitudeMandate): void {
+  const unit = body.purchase_units?.[0];
+  const capture = unit?.payments?.captures?.[0];
+  if (body.status !== "COMPLETED" || body.purchase_units?.length !== 1 || unit?.payments?.captures?.length !== 1 || !capture?.id || capture.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || capture.amount?.value !== "1.00" || unit?.reference_id !== mandate.id) {
+    throw new PublicError("PAYMENT_NOT_CONFIRMED", "PayPal did not confirm the exact gratitude payment.", 409);
+  }
+}
 
 export async function captureOrder(orderId: string, mandate: GratitudeMandate): Promise<PayPalCapture> {
+  assertMandateActive(mandate);
+  if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== 100 || !/^[A-Z0-9]{8,64}$/.test(orderId)) {
+    throw new PublicError("RAIL_REJECTED", "Invalid PayPal capture mandate or order.");
+  }
   const token = await accessToken();
+  const orderUrl = `${endpoint()}/v2/checkout/orders/${encodeURIComponent(orderId)}`;
+  // Validate provider-owned order details BEFORE any operation that can move money.
+  const detailsResponse = await fetch(orderUrl, {
+    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8_000)
+  });
+  const details = await detailsResponse.json() as PayPalCapture;
+  const unit = details.purchase_units?.[0];
+  if (!detailsResponse.ok || details.id !== orderId || details.intent !== "CAPTURE" || details.purchase_units?.length !== 1 || unit?.reference_id !== mandate.id || unit.custom_id !== mandate.id || unit.amount?.currency_code !== "USD" || unit.amount.value !== "1.00") {
+    throw new PublicError("PAYMENT_NOT_CONFIRMED", "The PayPal order does not match this mandate.", 409);
+  }
+  if (details.status === "COMPLETED") { assertConfirmed(details, mandate); return details; }
+  if (details.status !== "APPROVED") throw new PublicError("HUMAN_APPROVAL_REQUIRED", "PayPal has not recorded the payer's approval.", 409);
   const response = await fetch(`${endpoint()}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "PayPal-Request-Id": `${mandate.idempotencyKey}-capture` },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "PayPal-Request-Id": `${mandate.idempotencyKey}-capture`, Prefer: "return=representation" },
     signal: AbortSignal.timeout(8_000)
   });
   const body = await response.json() as PayPalCapture;
-  const capture = body.purchase_units?.[0]?.payments?.captures?.[0];
-  if (!response.ok || body.status !== "COMPLETED" || capture?.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || capture.amount?.value !== "1.00" || body.purchase_units?.[0]?.reference_id !== mandate.id) {
+  if (!response.ok || body.id !== orderId) {
     throw new PublicError("PAYMENT_NOT_CONFIRMED", "PayPal did not confirm the exact gratitude payment.", 409);
   }
+  assertConfirmed(body, mandate);
   return body;
 }
