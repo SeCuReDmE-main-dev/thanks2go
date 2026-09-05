@@ -25,11 +25,13 @@ and cleans up partially registered tools on cancellation or registration failure
 The rescan's remaining observations are the intentionally narrow single-page
 surface and free-form error-code strings. Neither weakens the payment boundary.
 
-Validation: 71 tests passed, including 26 WebMCP callback tests; strict TypeScript
+Validation: 72 tests passed, including 27 WebMCP callback tests; strict TypeScript
 and web/extension production builds passed. Callback tests use a controlled
 ModelContext and mocked HTTP: they are not a native-agent certification. The
 official B+ above was produced against deployed commit `d6508fa` after the
-bounded agent-contract refinement.
+bounded agent-contract refinement. Production staging was then revalidated at
+2 USD after the bounded clock-skew correction in `92a0787`; no payment was
+initiated by that test.
 
 Directory status at the time of this report remains **listing underway**. The
 public lookup API must return `supported: true` before indexing is claimed as
