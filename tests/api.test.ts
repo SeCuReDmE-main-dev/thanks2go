@@ -1,8 +1,10 @@
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Server } from "node:http";
 import type { Express } from "express";
 import { exportJWK, generateKeyPair } from "jose";
+import { newMandate } from "@thanks2go/contracts";
+import { signMandate } from "../api/crypto.js";
 
 let app: Express;
 let server: Server;
@@ -20,6 +22,7 @@ beforeAll(async () => {
   agentOrigin = `http://127.0.0.1:${address.port}`;
 });
 afterAll(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
+afterEach(() => vi.unstubAllEnvs());
 
 describe("API boundaries", () => {
   it("returns a filtered public profile", async () => {
@@ -41,8 +44,43 @@ describe("API boundaries", () => {
     expect(response.body.agentExchange.recipient.credential.split(".")).toHaveLength(3);
   });
 
+  it("handles two simultaneous HTTP A2A staging exchanges", async () => {
+    const body = { profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "solana-devnet", solAmount: "0.001" };
+    const responses = await Promise.all([
+      request(app).post("/api/intents/stage").send(body),
+      request(app).post("/api/intents/stage").send(body)
+    ]);
+    expect(responses.map(response => response.status)).toEqual([201, 201]);
+    expect(responses.every(response => response.body.agentExchange?.recipient?.credential)).toBe(true);
+  });
+
   it("refuses PayPal order creation without explicit approval", async () => {
     await request(app).post("/api/paypal/orders").send({ mandateToken: "irrelevant", humanApproved: false }).expect(409);
+  });
+
+  it("maps an expired JWT to the public 410 contract", async () => {
+    const expired = newMandate({ profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "paypal" }, "a".repeat(64), new Date(Date.now() - 700_000));
+    const mandateToken = await signMandate(expired);
+    const response = await request(app).post("/api/paypal/orders").send({ mandateToken, humanApproved: true }).expect(410);
+    expect(response.body).toMatchObject({code:"MANDATE_EXPIRED",message:"The gratitude mandate has expired."});
+  });
+
+  it("uses only the exact Vercel preview hostname for transport and Origin", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_URL", "thanks2go-git-audit-owner.vercel.app");
+    const { resolveAllowedOrigins, resolveTransportOrigin } = await import("../api/app.js");
+    expect(resolveTransportOrigin(() => "http://127.0.0.1:4555")).toBe("https://thanks2go-git-audit-owner.vercel.app");
+    expect(resolveAllowedOrigins()).toEqual(new Set(["https://thanks2go.securedme.ca", "https://thanks2go-git-audit-owner.vercel.app"]));
+    await request(app).get("/api/health").set("Origin", "https://thanks2go-git-audit-owner.vercel.app").expect(200);
+    await request(app).get("/api/health").set("Origin", "https://attacker.vercel.app").expect(403);
+  });
+
+  it("does not admit a Vercel deployment hostname in production", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "thanks2go-production-alias.vercel.app");
+    const { resolveAllowedOrigins, resolveTransportOrigin } = await import("../api/app.js");
+    expect(resolveTransportOrigin()).toBe("https://thanks2go.securedme.ca");
+    expect(resolveAllowedOrigins()).toEqual(new Set(["https://thanks2go.securedme.ca"]));
   });
 
   it("publishes JWKS and both agent cards", async () => {

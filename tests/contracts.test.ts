@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PublicError, assertMandateActive, isCanonicalProfileUrl, newMandate, sha256 } from "@thanks2go/contracts";
+import { PublicError, assertMandateActive, canonicalJson, isCanonicalProfileUrl, newMandate, sha256 } from "@thanks2go/contracts";
 
 describe("canonical profile contract", () => {
   it.each([
@@ -26,5 +26,16 @@ describe("mandate contract", () => {
   it("rejects expired mandates", () => {
     const mandate = newMandate({ profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "solana-devnet", solAmount: "0.001" }, attestation, new Date("2026-09-04T12:00:00.000Z"));
     expect(() => assertMandateActive(mandate, new Date("2026-09-04T12:10:00.001Z"))).toThrow(PublicError);
+  });
+});
+
+describe("canonical JSON domain", () => {
+  it("preserves deterministic valid-JSON serialization", () => {
+    expect(canonicalJson({ z: [true, null, 2], a: { y: "value", x: 1 } })).toBe('{"a":{"x":1,"y":"value"},"z":[true,null,2]}');
+    expect(sha256({ b: 2, a: 1 })).toBe(sha256({ a: 1, b: 2 }));
+  });
+
+  it.each([undefined, NaN, Infinity, 1n, Symbol("x"), () => undefined, { field: undefined }, [undefined], new Date()])("rejects non-JSON-domain input %#", value => {
+    expect(() => canonicalJson(value)).toThrow(TypeError);
   });
 });

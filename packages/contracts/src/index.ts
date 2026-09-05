@@ -4,6 +4,8 @@ import { PAYPAL_GRATITUDE_DISPLAY, PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUD
 
 export * from "./paypal.js";
 
+// Competition scope is deliberately single-recipient. These constants are the
+// authority boundary shared by the page, extension, agents, mandates and VCs.
 export const PUBLIC_ORIGIN = "https://thanks2go.securedme.ca";
 export const PROFILE_PATH = /^\/p\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -104,8 +106,16 @@ export function isCanonicalProfileUrl(input: string, origin = PUBLIC_ORIGIN): bo
 }
 
 export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("canonicalJson accepts finite JSON numbers only");
+    return JSON.stringify(value);
+  }
+  if (typeof value !== "object") throw new TypeError("canonicalJson accepts JSON values only");
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    throw new TypeError("canonicalJson accepts plain JSON objects only");
+  }
   return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
 }
 

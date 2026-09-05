@@ -2,6 +2,16 @@ import { PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUDE_VALUE, assertMandateActi
 
 const endpoint = () => process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
+async function providerJson<T>(response: Response, message: string, code: "RAIL_REJECTED" | "PAYMENT_NOT_CONFIRMED" = "RAIL_REJECTED"): Promise<T> {
+  try {
+    const value: unknown = await response.json();
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid provider object");
+    return value as T;
+  } catch {
+    throw new PublicError(code, message, 502);
+  }
+}
+
 async function accessToken(): Promise<string> {
   const id = process.env.PAYPAL_T2G_CLIENT_ID;
   const secret = process.env.PAYPAL_T2G_CLIENT_SECRET;
@@ -13,7 +23,8 @@ async function accessToken(): Promise<string> {
     signal: AbortSignal.timeout(8_000)
   });
   if (!response.ok) throw new PublicError("RAIL_REJECTED", "PayPal authentication failed.", 502);
-  const body = await response.json() as { access_token: string };
+  const body = await providerJson<{ access_token?: unknown }>(response, "PayPal authentication failed.");
+  if (typeof body.access_token !== "string" || !body.access_token) throw new PublicError("RAIL_REJECTED", "PayPal authentication failed.", 502);
   return body.access_token;
 }
 
@@ -32,9 +43,10 @@ export async function createOrder(mandate: GratitudeMandate): Promise<{ id: stri
     }),
     signal: AbortSignal.timeout(8_000)
   });
-  const body = await response.json() as { id?: string; status?: string; links?: Array<{ rel?: string; href?: string }> };
+  if (!response.ok) throw new PublicError("RAIL_REJECTED", "PayPal could not create the order.", 502);
+  const body = await providerJson<{ id?: string; status?: string; links?: Array<{ rel?: string; href?: string }> }>(response, "PayPal could not create the order.");
   const approveUrl = body.links?.find((link) => link.rel === "payer-action" || link.rel === "approve")?.href;
-  if (!response.ok || !body.id || !approveUrl) throw new PublicError("RAIL_REJECTED", "PayPal could not create the order.", 502);
+  if (!body.id || !approveUrl) throw new PublicError("RAIL_REJECTED", "PayPal could not create the order.", 502);
   return { id: body.id, status: body.status ?? "CREATED", approveUrl };
 }
 
@@ -59,9 +71,10 @@ export async function captureOrder(orderId: string, mandate: GratitudeMandate): 
   const detailsResponse = await fetch(orderUrl, {
     headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8_000)
   });
-  const details = await detailsResponse.json() as PayPalCapture;
+  if (!detailsResponse.ok) throw new PublicError("PAYMENT_NOT_CONFIRMED", "The PayPal order does not match this mandate.", 409);
+  const details = await providerJson<PayPalCapture>(detailsResponse, "The PayPal order could not be verified.", "PAYMENT_NOT_CONFIRMED");
   const unit = details.purchase_units?.[0];
-  if (!detailsResponse.ok || details.id !== orderId || details.intent !== "CAPTURE" || details.purchase_units?.length !== 1 || unit?.reference_id !== mandate.id || unit.custom_id !== mandate.id || unit.amount?.currency_code !== "USD" || unit.amount.value !== PAYPAL_GRATITUDE_VALUE) {
+  if (details.id !== orderId || details.intent !== "CAPTURE" || details.purchase_units?.length !== 1 || unit?.reference_id !== mandate.id || unit.custom_id !== mandate.id || unit.amount?.currency_code !== "USD" || unit.amount.value !== PAYPAL_GRATITUDE_VALUE) {
     throw new PublicError("PAYMENT_NOT_CONFIRMED", "The PayPal order does not match this mandate.", 409);
   }
   if (details.status === "COMPLETED") { assertConfirmed(details, mandate); return details; }
@@ -71,10 +84,11 @@ export async function captureOrder(orderId: string, mandate: GratitudeMandate): 
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "PayPal-Request-Id": `${mandate.idempotencyKey}-capture`, Prefer: "return=representation" },
     signal: AbortSignal.timeout(8_000)
   });
-  const body = await response.json() as PayPalCapture;
-  if (!response.ok || body.id !== orderId) {
+  if (!response.ok) {
     throw new PublicError("PAYMENT_NOT_CONFIRMED", "PayPal did not confirm the exact gratitude payment.", 409);
   }
+  const body = await providerJson<PayPalCapture>(response, "PayPal did not return a valid capture response.", "PAYMENT_NOT_CONFIRMED");
+  if (body.id !== orderId) throw new PublicError("PAYMENT_NOT_CONFIRMED", "PayPal did not confirm the exact gratitude payment.", 409);
   assertConfirmed(body, mandate);
   return body;
 }

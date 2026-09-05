@@ -2,6 +2,7 @@ import compression from "compression";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import bs58 from "bs58";
+import { errors as joseErrors } from "jose";
 import { AgentCard, verifyAgentCardSignature } from "@a2a-js/sdk";
 import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/server/express";
@@ -13,7 +14,32 @@ import { verifySolanaTransaction } from "./solana.js";
 import { verifyRecipientControl } from "./recipient.js";
 
 const origin = process.env.PUBLIC_ORIGIN ?? "https://thanks2go.securedme.ca";
-const allowedOrigins = new Set([origin, ...(process.env.VERCEL_ENV === "production" ? [] : ["http://localhost:5173", "http://127.0.0.1:5173"])]);
+
+function previewOrigin(): string | undefined {
+  const hostname = process.env.VERCEL_URL?.trim();
+  if (!hostname || hostname.includes("://") || hostname.includes("/") || hostname.includes("@")) return undefined;
+  try {
+    const candidate = new URL(`https://${hostname}`);
+    return candidate.protocol === "https:" && candidate.hostname === hostname ? candidate.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveTransportOrigin(localOrigin?: () => string): string {
+  if (process.env.VERCEL_ENV === "production") return origin;
+  return previewOrigin() ?? localOrigin?.() ?? process.env.A2A_LOCAL_ORIGIN ?? "http://127.0.0.1:3001";
+}
+
+export function resolveAllowedOrigins(): Set<string> {
+  const preview = process.env.VERCEL_ENV === "preview" ? previewOrigin() : undefined;
+  const localDevelopment = !process.env.VERCEL_ENV || process.env.VERCEL_ENV === "development";
+  return new Set([
+    origin,
+    ...(preview ? [preview] : []),
+    ...(localDevelopment ? ["http://localhost:5173", "http://127.0.0.1:5173"] : [])
+  ]);
+}
 
 function profile() {
   const recipient = process.env.SOLANA_DEVNET_RECIPIENT ?? "";
@@ -37,7 +63,7 @@ async function card(kind: AgentKind): Promise<AgentCard> {
 }
 
 export async function createApp(options: { agentOrigin?: () => string } = {}) {
-  const transportOrigin = () => process.env.VERCEL_ENV === "production" ? origin : options.agentOrigin?.() ?? process.env.A2A_LOCAL_ORIGIN ?? "http://127.0.0.1:3001";
+  const transportOrigin = () => resolveTransportOrigin(options.agentOrigin);
   async function askAgent(kind: AgentKind, input: unknown) {
     // Endpoint comes only from server configuration, never from the caller.
     const response = await fetch(`${transportOrigin()}/agents/${kind}/.well-known/agent-card.json`, {signal:AbortSignal.timeout(8_000)});
@@ -91,7 +117,7 @@ export async function createApp(options: { agentOrigin?: () => string } = {}) {
   app.use(express.json({ limit: "32kb", type: ["application/json", "application/*+json"] }));
   app.use((request, _response, next) => {
     const requestOrigin = request.get("origin");
-    if (requestOrigin && !allowedOrigins.has(requestOrigin)) return next(new PublicError("RAIL_REJECTED", "Cross-origin request rejected.", 403));
+    if (requestOrigin && !resolveAllowedOrigins().has(requestOrigin)) return next(new PublicError("RAIL_REJECTED", "Cross-origin request rejected.", 403));
     next();
   });
 
@@ -165,8 +191,11 @@ export async function createApp(options: { agentOrigin?: () => string } = {}) {
 
   app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
     const publicError = error instanceof PublicError ? error : undefined;
-    const code = publicError?.code ?? (error instanceof Error && error.message === "MANDATE_TAMPERED" ? "MANDATE_TAMPERED" : "RAIL_REJECTED");
-    response.status(publicError?.status ?? 400).json({ code, requestId: request.get("x-request-id") ?? crypto.randomUUID(), message: publicError?.message ?? "The request could not be completed." });
+    const mandateExpired = error instanceof joseErrors.JWTExpired;
+    const code = publicError?.code ?? (mandateExpired ? "MANDATE_EXPIRED" : error instanceof Error && error.message === "MANDATE_TAMPERED" ? "MANDATE_TAMPERED" : "RAIL_REJECTED");
+    const status = publicError?.status ?? (mandateExpired ? 410 : 400);
+    const message = publicError?.message ?? (mandateExpired ? "The gratitude mandate has expired." : "The request could not be completed.");
+    response.status(status).json({ code, requestId: request.get("x-request-id") ?? crypto.randomUUID(), message });
   });
   return app;
 }

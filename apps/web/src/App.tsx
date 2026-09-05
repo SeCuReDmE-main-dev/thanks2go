@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { DevnetStage } from "./solana-payment";
 import QRCode from "qrcode";
 import { registerThanks2GoTools } from "./webmcp";
+import { ApiError, api } from "./client-api";
+import { recoverExpiredMandate } from "./payment-recovery";
 
 type Profile = {
   profileUrl: string; displayName: string;
@@ -10,13 +12,6 @@ type Profile = {
   solana: { network: "devnet"; recipient: string; presets: [string, string, string] };
 };
 type Stage = DevnetStage & { mandateToken: string };
-
-const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(path, init);
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.message ?? "Request failed");
-  return body as T;
-};
 
 export default function App() {
   const [profile, setProfile] = useState<Profile>();
@@ -29,6 +24,17 @@ export default function App() {
   const paymentLock = useRef(false);
   const [wallets, setWallets] = useState<string[]>([]);
   const query = useMemo(() => new URLSearchParams(location.search), []);
+  const [paypalReturn, setPayPalReturn] = useState(() => query.get("paypal") === "return" && Boolean(query.get("token")));
+
+  function recoverExpiration(error: unknown, rail: "paypal" | "solana-devnet"): boolean {
+    return recoverExpiredMandate(error, rail, {
+      storage: sessionStorage,
+      currentUrl: location.href,
+      replaceUrl: (url) => history.replaceState(history.state, "", url),
+      deactivatePayPalReturn: () => setPayPalReturn(false),
+      deactivateSolanaStage: () => { setSolStage(undefined); setWallets([]); }
+    });
+  }
   useEffect(() => {
     if (query.get("paypal") === "cancel") {
       sessionStorage.removeItem("thanks2go:paypal-mandate");
@@ -44,6 +50,11 @@ export default function App() {
     QRCode.toDataURL(profile.profileUrl, { errorCorrectionLevel: "M", margin: 1, width: 180, color: { dark: "#030914", light: "#ffffff" } }).then(setProfileQr).catch(() => undefined);
     const lifecycle = new AbortController();
     registerThanks2GoTools(profile.profileUrl, (notice) => {
+      if (notice.rail === "solana-devnet" && notice.solAmount) {
+        setSolAmount(notice.solAmount);
+        setSolStage(undefined);
+        setWallets([]);
+      }
       setStatus(notice.message);
     }, lifecycle.signal).catch(() => undefined);
     return () => lifecycle.abort();
@@ -74,8 +85,9 @@ export default function App() {
       const order = await api<{ approveUrl: string }>("/api/paypal/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken, humanApproved: true }) });
       location.assign(order.approveUrl);
     } catch (error) {
-      if (error instanceof Error && error.message.toLowerCase().includes("expired")) sessionStorage.removeItem("thanks2go:paypal-mandate");
-      setStatus(error instanceof Error ? error.message : "Unable to open PayPal"); setBusy(false); paymentLock.current = false;
+      const expired = recoverExpiration(error, "paypal");
+      setStatus(expired ? "This mandate expired. Review the page and click Continue visibly to PayPal to start again." : error instanceof Error ? error.message : "Unable to open PayPal");
+      setBusy(false); paymentLock.current = false;
     }
   }
 
@@ -91,17 +103,11 @@ export default function App() {
       sessionStorage.removeItem("thanks2go:paypal-mandate");
       setReceipt(receipt);
       setStatus(`Confirmed by PayPal. Receipt ${String(receipt.providerReference).slice(0, 12)}… contains no payer name or email.`);
-    } catch (error) { setStatus(error instanceof Error ? error.message : "Capture was not confirmed"); }
+    } catch (error) {
+      const expired = recoverExpiration(error, "paypal");
+      setStatus(expired ? "This mandate expired. Review the page and start a new PayPal handoff." : error instanceof Error ? error.message : "Capture was not confirmed");
+    }
     finally { setBusy(false); paymentLock.current = false; }
-  }
-
-  async function verifySolana(signature: string) {
-    if (!solStage) { setStatus("No active devnet mandate. Stage the selected amount first."); return; }
-    try {
-      const confirmed = await api<Record<string, unknown>>("/api/solana/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mandateToken: solStage.mandateToken, signature }) });
-      setReceipt(confirmed);
-      setStatus(`Solana devnet demonstration confirmed: ${signature.slice(0, 12)}… This is not production money.`);
-    } catch (error) { setStatus(error instanceof Error ? error.message : "Devnet verification failed"); }
   }
 
   async function openDevnetWallet(walletName: string) {
@@ -112,20 +118,24 @@ export default function App() {
       const signature = await payDevnetTip(walletName, profile.solana.recipient, solStage);
       setStatus("Devnet transaction sent. Waiting for finalization before verifying the receipt.");
       for (let attempt = 0; attempt < 30; attempt++) {
-        const response = await fetch("/api/solana/verify", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mandateToken:solStage.mandateToken,signature})});
-        const value = await response.json();
-        if (response.ok) {setReceipt(value); setStatus(`Solana devnet confirmed: ${signature.slice(0,12)}…`); return;}
-        if (!String(value.message).includes("not finalized")) throw new Error(value.message);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+          const value = await api<Record<string, unknown>>("/api/solana/verify", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mandateToken:solStage.mandateToken,signature})});
+          setReceipt(value); setSolStage(undefined); setWallets([]); setStatus(`Solana devnet confirmed: ${signature.slice(0,12)}…`); return;
+        } catch (error) {
+          const retryable = error instanceof ApiError && (error.status >= 500 || error.message.includes("not finalized"));
+          if (!retryable) throw error;
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
       setStatus(`Finalization pending. Keep this devnet transaction signature: ${signature}`);
-    } catch(error) {setStatus(error instanceof Error ? error.message : "The wallet did not complete the devnet payment.");}
+    } catch(error) {
+      const expired = recoverExpiration(error, "solana-devnet");
+      setStatus(expired ? "This devnet mandate expired. Review the amount and stage a fresh mandate." : error instanceof Error ? error.message : "The wallet did not complete the devnet payment.");
+    }
     finally {paymentLock.current = false; setBusy(false);}
   }
 
   if (!profile) return <main id="main" className="shell"><p role="status">{status}</p></main>;
-  const paypalReturn = query.get("paypal") === "return" && Boolean(query.get("token"));
-
   return <>
     <div className="identity-strip">A SECUREDME EXPERIMENT <span>HUMAN FIRST. GRATITUDE BY CHOICE.</span></div>
     <header className="topbar"><a className="brand" href="/p/securedme">Thanks<span>2Go</span></a><nav aria-label="Main navigation"><a href="#rails">Give thanks</a><a href="https://securedme.ca">SecuredMe ↗</a></nav></header>
@@ -171,7 +181,9 @@ export default function App() {
         catch { setStatus("Receipt verification failed."); }
       }}>Verify this receipt</button><button onClick={() => {
         const url = URL.createObjectURL(new Blob([JSON.stringify(receipt, null, 2)], {type:"application/json"}));
-        const link = document.createElement("a"); link.href = url; link.download = "thanks2go-receipt.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const link = document.createElement("a"); link.href = url; link.download = "thanks2go-receipt.json";
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }}>Download receipt</button></section>}
       <section className="boundary"><p className="eyebrow">Human first, by design</p><h2>Agents prepare. You approve.</h2><p>A2A and experimental WebMCP tools may inspect this profile, stage an exact ten-minute mandate, open this visible handoff, and verify a receipt. They cannot click approval, create or capture PayPal autonomously, or sign a wallet transaction.</p></section>
     </main>

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newMandate } from "@thanks2go/contracts";
-import { captureOrder } from "../api/paypal.js";
+import { captureOrder, createOrder } from "../api/paypal.js";
 
 const orderId = "TESTORDER123456789";
 const mandate = () => newMandate({ profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "paypal" }, "a".repeat(64));
@@ -20,6 +20,45 @@ function setup(...responses: unknown[]) {
   return mock;
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+describe("PayPal order creation boundary", () => {
+  it("creates the fixed offer with the mandate idempotency key", async () => {
+    const m = mandate();
+    const mock = setup({ id: orderId, status: "CREATED", links: [{ rel: "payer-action", href: "https://www.sandbox.paypal.com/checkoutnow?token=TEST" }] });
+    await expect(createOrder(m)).resolves.toEqual({ id: orderId, status: "CREATED", approveUrl: "https://www.sandbox.paypal.com/checkoutnow?token=TEST" });
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(mock.mock.calls[1]?.[1]).toMatchObject({ method: "POST", headers: { "PayPal-Request-Id": m.idempotencyKey } });
+    const body = JSON.parse(String(mock.mock.calls[1]?.[1]?.body));
+    expect(body.purchase_units).toEqual([{ reference_id: m.id, custom_id: m.id, description: "Voluntary gratitude tip", amount: { currency_code: "USD", value: "2.00" } }]);
+  });
+
+  it("sanitizes an OAuth rejection before order creation", async () => {
+    vi.stubEnv("PAYPAL_T2G_CLIENT_ID", "test-client");
+    vi.stubEnv("PAYPAL_T2G_CLIENT_SECRET", "test-secret");
+    const mock = vi.fn().mockResolvedValue(new Response("<html>provider detail</html>", {status:401}));
+    vi.stubGlobal("fetch", mock);
+    await expect(createOrder(mandate())).rejects.toMatchObject({code:"RAIL_REJECTED",message:"PayPal authentication failed."});
+    expect(mock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects malformed provider success without leaking it", async () => {
+    vi.stubEnv("PAYPAL_T2G_CLIENT_ID", "test-client");
+    vi.stubEnv("PAYPAL_T2G_CLIENT_SECRET", "test-secret");
+    const mock = vi.fn()
+      .mockResolvedValueOnce(reply({access_token:"test-token"}))
+      .mockResolvedValueOnce(new Response("<html>provider detail</html>", {status:200}));
+    vi.stubGlobal("fetch", mock);
+    await expect(createOrder(mandate())).rejects.toMatchObject({code:"RAIL_REJECTED",message:"PayPal could not create the order."});
+  });
+
+  it("rejects a changed amount before contacting PayPal", async () => {
+    const m = mandate();
+    (m.amount as {currency:"USD";minorUnits:number}).minorUnits = 201;
+    const mock = vi.fn(); vi.stubGlobal("fetch", mock);
+    await expect(createOrder(m)).rejects.toMatchObject({code:"RAIL_REJECTED"});
+    expect(mock).not.toHaveBeenCalled();
+  });
+});
 
 describe("PayPal capture boundary", () => {
   it.each(["reference", "amount", "currency", "custom", "intent", "extra-unit"])("rejects mismatched %s before capture", async field => {

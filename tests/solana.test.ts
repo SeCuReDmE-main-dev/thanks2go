@@ -15,7 +15,7 @@ function fixture(mandate: ReturnType<typeof make>) {
     {programId:"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",parsed:`thanks2go:${hash}`}
   ]}}};
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("mandate-bound devnet transfers", () => {
   it("builds the exact Commerce Kit SOL transfer with reference and one signed memo", async () => {
     const m = make(); const hash = sha256(m);
@@ -27,9 +27,20 @@ describe("mandate-bound devnet transfers", () => {
     expect(new TextDecoder().decode(instructions[1]!.data)).toBe(`thanks2go:${hash}`);
   });
   it("accepts a finalized exact transfer and permits same-mandate verification retries", async () => {
-    const m=make(); vi.stubGlobal("fetch",vi.fn().mockImplementation(async()=>new Response(JSON.stringify({result:fixture(m)}))));
+    const m=make(); vi.stubEnv("SOLANA_RPC_URL", "https://rpc.example/devnet");
+    const fetchMock=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({result:fixture(m)}))); vi.stubGlobal("fetch",fetchMock);
     await expect(verifySolanaTransaction(signature,m,recipient)).resolves.toBeUndefined();
     await expect(verifySolanaTransaction(signature,m,recipient)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("https://rpc.example/devnet", expect.any(Object));
+  });
+  it("rejects a finalized transaction whose block time is unavailable", async () => {
+    const m=make(); const result = {...fixture(m), blockTime: undefined};
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({result}))));
+    await expect(verifySolanaTransaction(signature,m,recipient)).rejects.toMatchObject({code:"PAYMENT_NOT_CONFIRMED",message:"The finalized transaction block time is unavailable."});
+  });
+  it("sanitizes a malformed RPC gateway response", async () => {
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response("<html>private gateway detail</html>",{status:200})));
+    await expect(verifySolanaTransaction(signature,make(),recipient)).rejects.toMatchObject({code:"PAYMENT_NOT_CONFIRMED",message:"Solana devnet RPC returned an invalid response."});
   });
   it("rejects reusing one transaction for another same-amount mandate", async () => {
     const first=make(); vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({result:fixture(first)}))));

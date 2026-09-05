@@ -15,9 +15,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm audit --omit=dev
+      - run: npm run package:extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thanks2go-extension
+          path: apps/extension/thanks2go-extension-0.1.0.zip
+          if-no-files-found: error
       - name: Secret-pattern guard
         shell: bash
         run: |
-          if git grep -nE '(PAYPAL_T2G_CLIENT_SECRET=.{8,}|BEGIN (EC |RSA )?PRIVATE KEY|reward[.]tremendous[.]com/prepaid)' -- ':!package-lock.json' ':!.github/workflows/ci.yml'; then
+          if git grep -lE '(PAYPAL_T2G_CLIENT_SECRET=.{8,}|BEGIN (EC |RSA )?PRIVATE KEY|reward[.]tremendous[.]com/prepaid)' -- ':!package-lock.json' ':!.github/workflows/ci.yml'; then
             echo 'Potential secret detected'; exit 1
           fi
