@@ -19,7 +19,7 @@
 - [x] Dedicated `Thanks2Go Sandbox` PayPal app created after confirmation
 - [ ] Sandbox success, cancellation, refusal, double-click, and idempotent retry captured
 - [x] Dedicated `Thanks2Go Live` PayPal app created after confirmation
-- [ ] Separate consenting payer completes exactly 1.00 USD after confirmation
+- [ ] Separate consenting payer completes exactly 2.00 USD after confirmation
 - [ ] Capture is `COMPLETED`, merchant receipt is visible, API receipt contains no payer name/email
 
 ## Browser and deployment

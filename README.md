@@ -1,6 +1,6 @@
 # Thanks2Go
 
-Thanks2Go is a human-approved gratitude rail built for the DEV Weekend Challenge: Generosity Edition. A creator declares one canonical profile. A visitor explicitly chooses either a fixed **1.00 USD PayPal gratitude tip** or a clearly labelled **Solana devnet demonstration**.
+Thanks2Go is a human-approved gratitude rail built for the DEV Weekend Challenge: Generosity Edition. A creator declares one canonical profile. A visitor explicitly chooses either a fixed **2.00 USD PayPal gratitude tip** or a clearly labelled **Solana devnet demonstration**.
 
 Agents may inspect, stage, hand off, and verify. They cannot approve, capture, or sign payment.
 

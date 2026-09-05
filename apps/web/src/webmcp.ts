@@ -1,5 +1,6 @@
 /// <reference path="./types.d.ts" />
 import { z } from "zod";
+import { PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUDE_DISPLAY } from "@thanks2go/contracts/paypal";
 
 const canonicalProfile = "https://thanks2go.securedme.ca/p/securedme";
 const empty = z.object({}).strict();
@@ -95,11 +96,11 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
           trustStatement:"Origin and configured rail control only. Human identity, profile safety and payer identity are not verified."};
       }),
     tool("stage_gratitude_intent",
-      "Prepare a ten-minute intent for PayPal USD 1 or an explicit Solana devnet preset. Returns a summary, never a payment token. The human must review and approve using the visible controls.",
+      "Prepare a ten-minute intent for the fixed PayPal USD 2 gesture or an explicit Solana devnet preset. Returns a summary, never a payment token. The human must review and approve using the visible controls.",
       stageInput, false, async (input) => {
         const data = await request("/api/intents/stage", {profileUrl, ...input});
         const mandate = data.mandate;
-        const expected = input.rail === "paypal" ? {currency:"USD", minorUnits:100} :
+        const expected = input.rail === "paypal" ? {currency:"USD", minorUnits:PAYPAL_GRATITUDE_MINOR_UNITS} :
           {currency:"SOL", atomicUnits:String(Math.round(Number(input.solAmount)*1e9))};
         if (data.state !== "STAGED" || data.humanApprovalRequired !== true ||
             mandate?.profileUrl !== profileUrl || mandate?.rail !== input.rail ||
@@ -111,7 +112,7 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
         if (!/^[a-f0-9]{64}$/.test(recipient?.recipientAttestationHash ?? "") ||
             typeof recipient?.credential !== "string" || recipient.credential.split(".").length !== 3) throw new ToolFailure("INVALID_RESPONSE");
         notify({rail:input.rail, solAmount:input.solAmount,
-          message: `Agent prepared ${input.rail === "paypal" ? "$1.00 USD via PayPal" : input.solAmount+" SOL on devnet"}. Review the visible controls; no payment has started.`});
+          message: `Agent prepared ${input.rail === "paypal" ? PAYPAL_GRATITUDE_DISPLAY+" via PayPal" : input.solAmount+" SOL on devnet"}. Review the visible controls; no payment has started.`});
         return {state:"STAGED", profileUrl, rail:input.rail, amount:expected, mandateHash:data.mandateHash,
           expiresAt:mandate.expiresAt, recipientAttestationHash:recipient.recipientAttestationHash,
           recipientControlCredential:recipient.credential, verificationJwksUrl:`${new URL(profileUrl).origin}/.well-known/jwks.json`,

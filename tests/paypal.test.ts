@@ -7,8 +7,8 @@ const mandate = () => newMandate({ profileUrl: "https://thanks2go.securedme.ca/p
 const reply = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
 function provider(m: ReturnType<typeof mandate>, status = "APPROVED") {
   return { id: orderId, intent: "CAPTURE", status, purchase_units: [{ reference_id: m.id, custom_id: m.id,
-    amount: { currency_code: "USD", value: "1.00" },
-    payments: { captures: [{ id: "CAPTURE123", status: "COMPLETED", amount: { currency_code: "USD", value: "1.00" } }] }
+    amount: { currency_code: "USD", value: "2.00" },
+    payments: { captures: [{ id: "CAPTURE123", status: "COMPLETED", amount: { currency_code: "USD", value: "2.00" } }] }
   }] };
 }
 function setup(...responses: unknown[]) {
@@ -26,7 +26,7 @@ describe("PayPal capture boundary", () => {
     const m = mandate(); const details = provider(m); const unit = details.purchase_units[0]!;
     if (field === "reference") unit.reference_id = crypto.randomUUID();
     if (field === "custom") unit.custom_id = crypto.randomUUID();
-    if (field === "amount") unit.amount.value = "2.00";
+    if (field === "amount") unit.amount.value = "1.00";
     if (field === "currency") unit.amount.currency_code = "CAD";
     if (field === "intent") details.intent = "AUTHORIZE";
     if (field === "extra-unit") details.purchase_units.push({ ...unit });

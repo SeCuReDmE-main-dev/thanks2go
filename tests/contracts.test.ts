@@ -15,10 +15,10 @@ describe("canonical profile contract", () => {
 
 describe("mandate contract", () => {
   const attestation = "a".repeat(64);
-  it("fixes PayPal at one USD and ten minutes", () => {
+  it("fixes PayPal at two USD and ten minutes", () => {
     const now = new Date("2026-09-04T12:00:00.000Z");
     const mandate = newMandate({ profileUrl: "https://thanks2go.securedme.ca/p/securedme", rail: "paypal" }, attestation, now);
-    expect(mandate.amount).toEqual({ currency: "USD", minorUnits: 100 });
+    expect(mandate.amount).toEqual({ currency: "USD", minorUnits: 200 });
     expect(Date.parse(mandate.expiresAt) - Date.parse(mandate.issuedAt)).toBe(600_000);
     expect(sha256(mandate)).toMatch(/^[a-f0-9]{64}$/);
   });

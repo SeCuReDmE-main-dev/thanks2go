@@ -1,4 +1,4 @@
-import { assertMandateActive, PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
+import { PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUDE_VALUE, assertMandateActive, PublicError, type GratitudeMandate } from "../packages/contracts/src/index.js";
 
 const endpoint = () => process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
@@ -18,7 +18,7 @@ async function accessToken(): Promise<string> {
 }
 
 export async function createOrder(mandate: GratitudeMandate): Promise<{ id: string; status: string; approveUrl: string }> {
-  if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== 100) throw new PublicError("RAIL_REJECTED", "Only the fixed PayPal gratitude offer is accepted.");
+  if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== PAYPAL_GRATITUDE_MINOR_UNITS) throw new PublicError("RAIL_REJECTED", "Only the fixed PayPal gratitude offer is accepted.");
   const token = await accessToken();
   const sandboxOrigin = process.env.PAYPAL_ENV !== "live" ? process.env.PAYPAL_SANDBOX_RETURN_ORIGIN : undefined;
   const returnProfile = sandboxOrigin ? new URL("/p/securedme", sandboxOrigin).href : mandate.profileUrl;
@@ -27,7 +27,7 @@ export async function createOrder(mandate: GratitudeMandate): Promise<{ id: stri
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "PayPal-Request-Id": mandate.idempotencyKey },
     body: JSON.stringify({
       intent: "CAPTURE",
-      purchase_units: [{ reference_id: mandate.id, custom_id: mandate.id, description: "Voluntary gratitude tip", amount: { currency_code: "USD", value: "1.00" } }],
+      purchase_units: [{ reference_id: mandate.id, custom_id: mandate.id, description: "Voluntary gratitude tip", amount: { currency_code: "USD", value: PAYPAL_GRATITUDE_VALUE } }],
       payment_source: { paypal: { experience_context: { shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW", return_url: `${returnProfile}?paypal=return`, cancel_url: `${returnProfile}?paypal=cancel` } } }
     }),
     signal: AbortSignal.timeout(8_000)
@@ -43,14 +43,14 @@ export type PayPalCapture = { id: string; status: string; intent?: string; payer
 function assertConfirmed(body: PayPalCapture, mandate: GratitudeMandate): void {
   const unit = body.purchase_units?.[0];
   const capture = unit?.payments?.captures?.[0];
-  if (body.status !== "COMPLETED" || body.purchase_units?.length !== 1 || unit?.payments?.captures?.length !== 1 || !capture?.id || capture.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || capture.amount?.value !== "1.00" || unit?.reference_id !== mandate.id) {
+  if (body.status !== "COMPLETED" || body.purchase_units?.length !== 1 || unit?.payments?.captures?.length !== 1 || !capture?.id || capture.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || capture.amount?.value !== PAYPAL_GRATITUDE_VALUE || unit?.reference_id !== mandate.id) {
     throw new PublicError("PAYMENT_NOT_CONFIRMED", "PayPal did not confirm the exact gratitude payment.", 409);
   }
 }
 
 export async function captureOrder(orderId: string, mandate: GratitudeMandate): Promise<PayPalCapture> {
   assertMandateActive(mandate);
-  if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== 100 || !/^[A-Z0-9]{8,64}$/.test(orderId)) {
+  if (mandate.rail !== "paypal" || mandate.amount.currency !== "USD" || mandate.amount.minorUnits !== PAYPAL_GRATITUDE_MINOR_UNITS || !/^[A-Z0-9]{8,64}$/.test(orderId)) {
     throw new PublicError("RAIL_REJECTED", "Invalid PayPal capture mandate or order.");
   }
   const token = await accessToken();
@@ -61,7 +61,7 @@ export async function captureOrder(orderId: string, mandate: GratitudeMandate): 
   });
   const details = await detailsResponse.json() as PayPalCapture;
   const unit = details.purchase_units?.[0];
-  if (!detailsResponse.ok || details.id !== orderId || details.intent !== "CAPTURE" || details.purchase_units?.length !== 1 || unit?.reference_id !== mandate.id || unit.custom_id !== mandate.id || unit.amount?.currency_code !== "USD" || unit.amount.value !== "1.00") {
+  if (!detailsResponse.ok || details.id !== orderId || details.intent !== "CAPTURE" || details.purchase_units?.length !== 1 || unit?.reference_id !== mandate.id || unit.custom_id !== mandate.id || unit.amount?.currency_code !== "USD" || unit.amount.value !== PAYPAL_GRATITUDE_VALUE) {
     throw new PublicError("PAYMENT_NOT_CONFIRMED", "The PayPal order does not match this mandate.", 409);
   }
   if (details.status === "COMPLETED") { assertConfirmed(details, mandate); return details; }

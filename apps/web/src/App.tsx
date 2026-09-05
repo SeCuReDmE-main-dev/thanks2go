@@ -146,10 +146,10 @@ export default function App() {
         <div className="section-heading"><p className="eyebrow">Two rails, two meanings</p><h2 id="rails-title">Choose your gesture</h2><p>{profile.paypal.environment === "live" ? "One real tip." : "One PayPal sandbox test."} One devnet experiment. Always your choice.</p></div>
         <div className="rail-grid">
         <article className="rail paypal">
-          <p className="rail-number">01 / {profile.paypal.environment.toUpperCase()}</p><h3>{profile.paypal.environment === "live" ? "One real dollar" : "One test dollar — sandbox"}</h3>
+          <p className="rail-number">01 / {profile.paypal.environment.toUpperCase()}</p><h3>{profile.paypal.environment === "live" ? "A two-dollar thank-you" : "A two-dollar sandbox test"}</h3>
           {profile.paypal.environment === "sandbox" && <p>Sandbox test: no real money is transferred.</p>}
           <p>A fixed <strong>{profile.paypal.displayAmount}</strong> voluntary gratitude tip through PayPal. No good, service, tax receipt, or charitable donation is promised.</p>
-          {paypalReturn ? <button disabled={busy || Boolean(receipt)} onClick={capturePayPal}>{receipt ? "Payment confirmed" : "Approve final capture of $1"}</button> : <button disabled={busy || !profile.paypal.enabled} onClick={startPayPal}>{profile.paypal.enabled ? "Continue visibly to PayPal" : "PayPal configuration pending"}</button>}
+          {paypalReturn ? <button disabled={busy || Boolean(receipt)} onClick={capturePayPal}>{receipt ? "Payment confirmed" : `Approve final capture of ${profile.paypal.displayAmount}`}</button> : <button disabled={busy || !profile.paypal.enabled} onClick={startPayPal}>{profile.paypal.enabled ? "Continue visibly to PayPal" : "PayPal configuration pending"}</button>}
         </article>
         <article className="rail solana">
           <p className="rail-number">02 / DEVNET DEMO</p><h3>Try a Solana thank-you</h3>

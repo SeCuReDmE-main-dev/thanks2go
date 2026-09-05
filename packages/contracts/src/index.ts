@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { PAYPAL_GRATITUDE_DISPLAY, PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUDE_OFFER_ID } from "./paypal.js";
+
+export * from "./paypal.js";
 
 export const PUBLIC_ORIGIN = "https://thanks2go.securedme.ca";
 export const PROFILE_PATH = /^\/p\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
@@ -7,7 +10,7 @@ export const PROFILE_PATH = /^\/p\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 export const gratitudeRailSchema = z.enum(["paypal", "solana-devnet"]);
 export type GratitudeRail = z.infer<typeof gratitudeRailSchema>;
 
-const paypalAmountSchema = z.object({ currency: z.literal("USD"), minorUnits: z.literal(100) });
+const paypalAmountSchema = z.object({ currency: z.literal("USD"), minorUnits: z.literal(PAYPAL_GRATITUDE_MINOR_UNITS) });
 const solanaAmountSchema = z.object({
   currency: z.literal("SOL"),
   atomicUnits: z.string().regex(/^\d+$/).refine((value) => {
@@ -66,7 +69,7 @@ export const publicProfileSchema = z.object({
     railDestinationControlled: z.boolean(),
     humanIdentityVerified: z.literal(false)
   }),
-  paypal: z.object({ offerId: z.literal("gratitude-usd-1"), displayAmount: z.literal("$1.00 USD"), enabled: z.boolean(), environment: z.enum(["live", "sandbox"]) }),
+  paypal: z.object({ offerId: z.literal(PAYPAL_GRATITUDE_OFFER_ID), displayAmount: z.literal(PAYPAL_GRATITUDE_DISPLAY), enabled: z.boolean(), environment: z.enum(["live", "sandbox"]) }),
   solana: z.object({ network: z.literal("devnet"), recipient: z.string(), presets: z.tuple([z.literal("0.001"), z.literal("0.005"), z.literal("0.01")]) })
 });
 
@@ -113,7 +116,7 @@ export function sha256(value: unknown): string {
 export function newMandate(input: z.infer<typeof stageIntentSchema>, recipientAttestationHash: string, now = new Date()): GratitudeMandate {
   if (!isCanonicalProfileUrl(input.profileUrl)) throw new PublicError("INVALID_PROFILE_URL", "The profile URL is not canonical.");
   const amount = input.rail === "paypal"
-    ? { currency: "USD" as const, minorUnits: 100 as const }
+    ? { currency: "USD" as const, minorUnits: PAYPAL_GRATITUDE_MINOR_UNITS }
     : { currency: "SOL" as const, atomicUnits: String(Math.round(Number(input.solAmount ?? "0.001") * 1_000_000_000)) };
   return gratitudeMandateSchema.parse({
     version: "1",

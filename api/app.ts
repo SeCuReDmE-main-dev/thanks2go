@@ -6,7 +6,7 @@ import { AgentCard, verifyAgentCardSignature } from "@a2a-js/sdk";
 import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/server/express";
 import { ImmediateAgentExecutor, signedAgentCard, unsignedAgentCard, sendAgentMessage, type AgentKind } from "../packages/a2a/src/index.js";
-import { PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "../packages/contracts/src/index.js";
+import { PAYPAL_GRATITUDE_DISPLAY, PAYPAL_GRATITUDE_OFFER_ID, PublicError, assertMandateActive, gratitudeReceiptSchema, newMandate, publicProfileSchema, sha256, stageIntentSchema } from "../packages/contracts/src/index.js";
 import { hashPayerReference, issueReceiptCredential, issueRecipientControlCredential, keyMaterial, signMandate, verifyMandate, verifyReceiptCredential, verifyRecipientControlCredential, type RecipientControlClaims } from "./crypto.js";
 import { captureOrder, createOrder } from "./paypal.js";
 import { verifySolanaTransaction } from "./solana.js";
@@ -21,7 +21,7 @@ function profile() {
   return publicProfileSchema.parse({
     version: "1", slug: "securedme", displayName: "Jean-Sébastien Beaulieu / SecuredMe", profileUrl: `${origin}/p/securedme`,
     attestation: { originControlled: true, railDestinationControlled: false, humanIdentityVerified: false },
-    paypal: { offerId: "gratitude-usd-1", displayAmount: "$1.00 USD", enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID && process.env.PAYPAL_T2G_CLIENT_SECRET), environment: process.env.PAYPAL_ENV === "live" ? "live" : "sandbox" },
+    paypal: { offerId: PAYPAL_GRATITUDE_OFFER_ID, displayAmount: PAYPAL_GRATITUDE_DISPLAY, enabled: Boolean(process.env.PAYPAL_T2G_CLIENT_ID && process.env.PAYPAL_T2G_CLIENT_SECRET), environment: process.env.PAYPAL_ENV === "live" ? "live" : "sandbox" },
     solana: { network: "devnet", recipient: solanaControlled ? recipient : "", presets: ["0.001", "0.005", "0.01"] }
   });
 }

@@ -74,7 +74,7 @@ describe("WebMCP real callbacks and payment boundary",()=>{
   it.each(["paypal","solana-devnet"])("stages %s without sharing the token or creating payment",async(rail)=>{
     await registerThanks2GoTools(url,notify);
     const input=rail==="paypal"?{rail}:{rail,solAmount:"0.005"};
-    const amount=rail==="paypal"?{currency:"USD",minorUnits:100}:{currency:"SOL",atomicUnits:"5000000"};
+    const amount=rail==="paypal"?{currency:"USD",minorUnits:200}:{currency:"SOL",atomicUnits:"5000000"};
     respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),mandateToken:"never-output",
       mandate:{profileUrl:url,rail,amount,expiresAt:new Date(Date.now()+590000).toISOString()},
       agentExchange:{recipient:{recipientAttestationHash:"c".repeat(64),credential:"header.payload.signature"}}});
@@ -93,7 +93,7 @@ describe("WebMCP real callbacks and payment boundary",()=>{
   it("rejects expired staged responses",async()=>{
     await registerThanks2GoTools(url);
     respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),
-      mandate:{profileUrl:url,rail:"paypal",amount:{currency:"USD",minorUnits:100},expiresAt:"2020-01-01T00:00:00.000Z"}});
+      mandate:{profileUrl:url,rail:"paypal",amount:{currency:"USD",minorUnits:200},expiresAt:"2020-01-01T00:00:00.000Z"}});
     expect((await run(names[1]!,{rail:"paypal"})).isError).toBe(true);
   });
   it("handoff focuses and scrolls the panel without network or click",async()=>{

@@ -34,7 +34,7 @@ keys out of the recording.
 
 ## 1:55-2:25 — two rails, two meanings
 
-Show the fixed 1 USD PayPal rail and the bounded 0.001/0.005/0.01 SOL devnet
+Show the fixed 2 USD PayPal rail and the bounded 0.001/0.005/0.01 SOL devnet
 presets. Use pre-recorded provider evidence or a sanitized receipt from the
 release evidence pack. Never display a payer name, email, access token, wallet
 secret, private environment file, or financial-card URL.

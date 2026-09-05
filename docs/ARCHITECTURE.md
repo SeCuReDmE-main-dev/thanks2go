@@ -2,7 +2,7 @@
 
 ```text
 explicit page declaration → click-scoped MV3 inspection → visible profile
-                                                   ├─ PayPal 1 USD live rail
+                                                   ├─ PayPal 2 USD live rail
                                                    └─ Solana devnet Commerce Kit
 
 WebMCP/A2A → inspect or stage → visible human approval → provider → verified receipt VC
