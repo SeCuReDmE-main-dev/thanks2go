@@ -1,6 +1,6 @@
 # Test map
 
-Baseline verified 2026-09-04: 9 files, 71 tests, all passing.
+Current baseline: 9 files, 72 tests, all passing. Production QA exposed a client/server clock-skew bug in WebMCP intent validation; a regression test was added for exact ten-minute signed lifetimes and rejection beyond ten minutes.
 
 | File | Coverage focus |
 |---|---|
@@ -15,4 +15,3 @@ Baseline verified 2026-09-04: 9 files, 71 tests, all passing.
 | `recipient.test.ts` | configured recipient control proof |
 
 Manual evidence still required: clean-profile Chrome extension, full PayPal sandbox scenarios, finalized Solana devnet transaction, distinct-payer live PayPal capture, keyboard/screen-reader/mobile browser pass, demo video and submission.
-

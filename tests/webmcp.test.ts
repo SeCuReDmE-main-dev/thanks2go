@@ -75,8 +75,9 @@ describe("WebMCP real callbacks and payment boundary",()=>{
     await registerThanks2GoTools(url,notify);
     const input=rail==="paypal"?{rail}:{rail,solAmount:"0.005"};
     const amount=rail==="paypal"?{currency:"USD",minorUnits:200}:{currency:"SOL",atomicUnits:"5000000"};
+    const issuedAt=new Date(Date.now()+1000).toISOString();
     respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),mandateToken:"never-output",
-      mandate:{profileUrl:url,rail,amount,expiresAt:new Date(Date.now()+590000).toISOString()},
+      mandate:{profileUrl:url,rail,amount,issuedAt,expiresAt:new Date(Date.parse(issuedAt)+600000).toISOString()},
       agentExchange:{recipient:{recipientAttestationHash:"c".repeat(64),credential:"header.payload.signature"}}});
     const value=await run(names[1]!,input);
     expect(value.isError).toBe(false);expect(parse(value).amount).toEqual(amount);
@@ -93,7 +94,14 @@ describe("WebMCP real callbacks and payment boundary",()=>{
   it("rejects expired staged responses",async()=>{
     await registerThanks2GoTools(url);
     respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),
-      mandate:{profileUrl:url,rail:"paypal",amount:{currency:"USD",minorUnits:200},expiresAt:"2020-01-01T00:00:00.000Z"}});
+      mandate:{profileUrl:url,rail:"paypal",amount:{currency:"USD",minorUnits:200},issuedAt:"2019-12-31T23:50:00.000Z",expiresAt:"2020-01-01T00:00:00.000Z"}});
+    expect((await run(names[1]!,{rail:"paypal"})).isError).toBe(true);
+  });
+  it("rejects a staged response whose signed lifetime exceeds ten minutes",async()=>{
+    await registerThanks2GoTools(url);
+    const issuedAt=new Date().toISOString();
+    respond({state:"STAGED",humanApprovalRequired:true,mandateHash:"b".repeat(64),
+      mandate:{profileUrl:url,rail:"paypal",amount:{currency:"USD",minorUnits:200},issuedAt,expiresAt:new Date(Date.parse(issuedAt)+600001).toISOString()}});
     expect((await run(names[1]!,{rail:"paypal"})).isError).toBe(true);
   });
   it("handoff focuses and scrolls the panel without network or click",async()=>{

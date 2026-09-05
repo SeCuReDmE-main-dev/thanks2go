@@ -3,6 +3,8 @@ import { z } from "zod";
 import { PAYPAL_GRATITUDE_MINOR_UNITS, PAYPAL_GRATITUDE_DISPLAY } from "@thanks2go/contracts/paypal";
 
 const canonicalProfile = "https://thanks2go.securedme.ca/p/securedme";
+const MAX_MANDATE_TTL_MS = 600_000;
+const CLOCK_SKEW_TOLERANCE_MS = 30_000;
 const empty = z.object({}).strict();
 const stageInput = z.discriminatedUnion("rail", [
   z.object({ rail: z.literal("paypal") }).strict(),
@@ -102,12 +104,15 @@ export async function registerThanks2GoTools(profileUrl: string, notify: (notice
         const mandate = data.mandate;
         const expected = input.rail === "paypal" ? {currency:"USD", minorUnits:PAYPAL_GRATITUDE_MINOR_UNITS} :
           {currency:"SOL", atomicUnits:String(Math.round(Number(input.solAmount)*1e9))};
+        const issuedAt = Date.parse(mandate?.issuedAt);
+        const expiresAt = Date.parse(mandate?.expiresAt);
+        const ttl = expiresAt - issuedAt;
         if (data.state !== "STAGED" || data.humanApprovalRequired !== true ||
             mandate?.profileUrl !== profileUrl || mandate?.rail !== input.rail ||
             !/^[a-f0-9]{64}$/.test(data.mandateHash ?? "") ||
             !mandate.amount || Object.entries(expected).some(([key,value])=>mandate.amount[key] !== value) ||
-            !Number.isFinite(Date.parse(mandate.expiresAt)) || Date.parse(mandate.expiresAt) <= Date.now() ||
-            Date.parse(mandate.expiresAt) - Date.now() > 600000) throw new ToolFailure("INVALID_RESPONSE");
+            !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || ttl <= 0 || ttl > MAX_MANDATE_TTL_MS ||
+            expiresAt <= Date.now() - CLOCK_SKEW_TOLERANCE_MS) throw new ToolFailure("INVALID_RESPONSE");
         const recipient = data.agentExchange?.recipient;
         if (!/^[a-f0-9]{64}$/.test(recipient?.recipientAttestationHash ?? "") ||
             typeof recipient?.credential !== "string" || recipient.credential.split(".").length !== 3) throw new ToolFailure("INVALID_RESPONSE");
