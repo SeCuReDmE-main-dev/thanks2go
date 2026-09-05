@@ -3,7 +3,7 @@
 ## Automated
 
 - [x] TypeScript strict typecheck
-- [x] Contract, expiry, tamper, API, extension, and WebMCP tests
+- [x] Contract, expiry, clock-skew, tamper, API, extension, and WebMCP tests
 - [x] Real SDK A2A 1.0 `SendMessage` integration test
 - [x] Signed Agent Cards in configured-key mode
 - [x] Payer agent obtains and validates a recipient-agent response before staging (local and production)
@@ -26,7 +26,7 @@
 
 - [x] Keyboard skip link and critical rail controls pass locally
 - [x] Semantic heading/label accessibility-tree pass locally
-- [x] Updated SecuredMe theme mobile viewport pass at 390 x 844
+- [x] Updated SecuredMe theme mobile viewport pass at 390 x 844 after 2 USD deployment
 - [ ] Chrome extension clean-profile pass
 - [x] Vercel production deployment
 - [x] Exact cPanel CNAME configured
